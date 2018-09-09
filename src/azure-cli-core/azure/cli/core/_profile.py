@@ -12,15 +12,14 @@ import os
 import os.path
 from copy import deepcopy
 from enum import Enum
+from sys import platform
 from six.moves import BaseHTTPServer
-
-import win32crypt 
 from knack.log import get_logger
 from knack.util import CLIError
 
 from azure.cli.core._environment import get_config_dir
 from azure.cli.core._session import ACCOUNT
-from azure.cli.core.util import get_file_json, in_cloud_console, open_page_in_browser, can_launch_browser, shell_safe_json_parse
+from azure.cli.core.util import in_cloud_console, open_page_in_browser, can_launch_browser, shell_safe_json_parse
 from azure.cli.core.cloud import get_active_cloud, set_cloud_subscription
 
 logger = get_logger(__name__)
@@ -97,17 +96,29 @@ _AUTH_CTX_FACTORY = _authentication_context_factory
 
 
 def _load_tokens_from_file(file_path):
-    if os.path.isfile(file_path):
-        try:
-            with open(file_path, 'rb') as file:
-                blob = file.read()
-                got_desc, got_data = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
-                data = got_data.decode('utf8')
-            return shell_safe_json_parse(data) or []
-        except (CLIError, ValueError) as ex:
-            raise CLIError("Failed to load token files. If you have a repro, please log an issue at "
-                           "https://github.com/Azure/azure-cli/issues. At the same time, you can clean "
-                           "up by running 'az account clear' and then 'az login'. (Inner Error: {})".format(ex))
+    try:
+        data = '[]'
+        if platform == "win32":
+            import win32crypt  # pylint: disable=import-error
+            if os.path.isfile(file_path):
+                with open(file_path, 'rb') as token_file:
+                    blob = token_file.read()
+                    _, got_data = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
+            data = got_data.decode('utf8')
+        elif platform == 'darwin':
+            import keyring
+            try:
+                data = keyring.get_password('cli', 'cred')
+            except Exception as ex:  # pylint: disable=broad-except
+                logger.warning('loading from keychain failed for "%s"', ex)
+        else:
+            raise CLIError('No secure storage on Linux')
+
+        return shell_safe_json_parse(data) or []
+    except (CLIError, ValueError) as ex:
+        raise CLIError("Failed to load token files. If you have a repro, please log an issue at "
+                       "https://github.com/Azure/azure-cli/issues. At the same time, you can clean "
+                       "up by running 'az account clear' and then 'az login'. (Inner Error: {})".format(ex))
     return []
 
 
@@ -844,20 +855,25 @@ class CredsCache(object):
 
     def flush_to_disk(self):
         if self._should_flush_to_disk:
-            with open(self._token_file, 'wb') as cred_file:
-                items = self.adal_token_cache.read_items()
-                all_creds = [entry for _, entry in items]
-
-                # trim away useless fields (needed for cred sharing with xplat)
-                for i in all_creds:
-                    for key in TOKEN_FIELDS_EXCLUDED_FROM_PERSISTENCE:
-                        i.pop(key, None)
-
-                all_creds.extend(self._service_principal_creds)
-                data = json.dumps(all_creds).encode('utf8')
-               
-                blob = win32crypt.CryptProtectData(data, None, None, None, None, 0)
-                cred_file.write(blob)
+            items = self.adal_token_cache.read_items()
+            all_creds = [entry for _, entry in items]
+            # trim away useless fields (needed for cred sharing with xplat)
+            for i in all_creds:
+                for key in TOKEN_FIELDS_EXCLUDED_FROM_PERSISTENCE:
+                    i.pop(key, None)
+            all_creds.extend(self._service_principal_creds)
+            data = json.dumps(all_creds)
+            if platform == 'win32':
+                import win32crypt  # pylint: disable=import-error
+                with open(self._token_file, 'wb') as cred_file:
+                    data = data.encode('utf8')
+                    blob = win32crypt.CryptProtectData(data, None, None, None, None, 0)
+                    cred_file.write(blob)
+            elif platform == 'darwin':
+                import keyring
+                keyring.set_password('cli', 'cred', data)
+            else:
+                raise CLIError('no secure storage in Linux')
 
     def retrieve_token_for_user(self, username, tenant, resource):
         context = self._auth_ctx_factory(self._ctx, tenant, cache=self.adal_token_cache)
