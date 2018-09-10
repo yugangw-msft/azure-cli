@@ -112,7 +112,16 @@ def _load_tokens_from_file(file_path):
             except Exception as ex:  # pylint: disable=broad-except
                 logger.warning('loading from keychain failed for "%s"', ex)
         else:
-            raise CLIError('No secure storage on Linux')
+            import gi
+            gi.require_version('Secret', '1')
+            from gi.repository import Secret
+            EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure",
+                Secret.SchemaFlags.NONE,
+                {
+                    "string": Secret.SchemaAttributeType.STRING
+                }
+            )
+            data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, { "string": "cred" }, None) or []
 
         return shell_safe_json_parse(data) or []
     except (CLIError, ValueError) as ex:
@@ -873,7 +882,13 @@ class CredsCache(object):
                 import keyring
                 keyring.set_password('cli', 'cred', data)
             else:
-                raise CLIError('no secure storage in Linux')
+                import gi
+                gi.require_version('Secret', '1')
+                from gi.repository import Secret
+                EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure", Secret.SchemaFlags.NONE,
+                                                   { "string": Secret.SchemaAttributeType.STRING})
+                Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT, 'theLabel',
+                                           data, None)
 
     def retrieve_token_for_user(self, username, tenant, resource):
         context = self._auth_ctx_factory(self._ctx, tenant, cache=self.adal_token_cache)
