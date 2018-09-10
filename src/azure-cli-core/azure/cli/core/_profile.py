@@ -112,16 +112,23 @@ def _load_tokens_from_file(file_path):
             except Exception as ex:  # pylint: disable=broad-except
                 logger.warning('loading from keychain failed for "%s"', ex)
         else:
-            import gi
-            gi.require_version('Secret', '1')
-            from gi.repository import Secret
-            EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure",
-                Secret.SchemaFlags.NONE,
-                {
-                    "string": Secret.SchemaAttributeType.STRING
-                }
-            )
-            data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, { "string": "cred" }, None) or []
+            try:
+                import gi
+                gi.require_version('Secret', '1')
+                from gi.repository import Secret
+                EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure",
+                    Secret.SchemaFlags.NONE,
+                    {
+                        "string": Secret.SchemaAttributeType.STRING
+                    }
+                )
+                data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, { "string": "cred" }, None) or []            
+            except ImportError:
+                import keyring
+                try:
+                    data = keyring.get_password('cli', 'cred')
+                except Exception as ex:  # pylint: disable=broad-except
+                    logger.warning('loading from keychain failed for "%s"', ex)
 
         return shell_safe_json_parse(data) or []
     except (CLIError, ValueError) as ex:
@@ -882,13 +889,17 @@ class CredsCache(object):
                 import keyring
                 keyring.set_password('cli', 'cred', data)
             else:
-                import gi
-                gi.require_version('Secret', '1')
-                from gi.repository import Secret
-                EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure", Secret.SchemaFlags.NONE,
-                                                   { "string": Secret.SchemaAttributeType.STRING})
-                Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT, 'theLabel',
-                                           data, None)
+                try:
+                    import gi
+                    gi.require_version('Secret', '1')
+                    from gi.repository import Secret
+                    EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure", Secret.SchemaFlags.NONE,
+                                                       { "string": Secret.SchemaAttributeType.STRING})
+                    Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT, 'theLabel',
+                                               data, None)
+                except ImportError:
+                    import keyring
+                    keyring.set_password('cli', 'cred', data)
 
     def retrieve_token_for_user(self, username, tenant, resource):
         context = self._auth_ctx_factory(self._ctx, tenant, cache=self.adal_token_cache)
