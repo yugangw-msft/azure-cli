@@ -116,13 +116,13 @@ def _load_tokens_from_file(file_path):
                 import gi
                 gi.require_version('Secret', '1')
                 from gi.repository import Secret
-                EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure",
-                    Secret.SchemaFlags.NONE,
+                EXAMPLE_SCHEMA = Secret.Schema.new(
+                    "2.cli.azure", Secret.SchemaFlags.NONE,
                     {
                         "string": Secret.SchemaAttributeType.STRING
                     }
                 )
-                data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, { "string": "cred" }, None) or []            
+                data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, {"string": "cred"}, None)
             except ImportError:
                 import keyring
                 try:
@@ -130,7 +130,7 @@ def _load_tokens_from_file(file_path):
                 except Exception as ex:  # pylint: disable=broad-except
                     logger.warning('loading from keychain failed for "%s"', ex)
 
-        return shell_safe_json_parse(data) or []
+        return shell_safe_json_parse(data) if data else []
     except (CLIError, ValueError) as ex:
         raise CLIError("Failed to load token files. If you have a repro, please log an issue at "
                        "https://github.com/Azure/azure-cli/issues. At the same time, you can clean "
@@ -894,9 +894,9 @@ class CredsCache(object):
                     gi.require_version('Secret', '1')
                     from gi.repository import Secret
                     EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure", Secret.SchemaFlags.NONE,
-                                                       { "string": Secret.SchemaAttributeType.STRING})
-                    Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT, 'theLabel',
-                                               data, None)
+                                                       {"string": Secret.SchemaAttributeType.STRING})
+                    Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT,
+                                               'theLabel', data, None)
                 except ImportError:
                     import keyring
                     keyring.set_password('cli', 'cred', data)
