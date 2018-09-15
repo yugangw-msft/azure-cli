@@ -104,7 +104,7 @@ def _load_tokens_from_file(file_path):
                 with open(file_path, 'rb') as token_file:
                     blob = token_file.read()
                     _, got_data = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
-            data = got_data.decode('utf8')
+                    data = got_data.decode('utf8')
         elif platform == 'darwin':
             import keyring
             try:
