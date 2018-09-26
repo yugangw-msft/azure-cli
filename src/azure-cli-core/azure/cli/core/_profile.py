@@ -115,8 +115,11 @@ def _load_tokens_from_file(file_path):
         else:
             from keyctl import Key
             from keyctl.keyctlwrapper import KeyNotExistError
+            import subprocess
+            # TODO: handle bytes
+            kernel_keyring_id = subprocess.check_output(['keyctl', 'get_persistent', '@u']).rstrip()
             try:
-                data = Key.search('cli').data
+                data = Key.search('cli', keyring=kernel_keyring_id).data
             except KeyNotExistError:
                 pass
 
@@ -898,13 +901,16 @@ class CredsCache(object):
                 import keyring
                 keyring.set_password('cli', 'cred', data)
             else:
-                from keyctl import Key
+                from keyctl import Key, KeyNotExistError
                 import subprocess
                 # TODO: handle bytes
                 kernel_keyring_id = subprocess.check_output(['keyctl', 'get_persistent', '@u']).rstrip()
 
-                Key.add('cli', data, keyring=kernel_keyring_id)
-
+                try:
+                    key_id = Key.search('cli', keyring=kernel_keyring_id).id
+                    Key(key_id).update(data)
+                except KeyNotExistError:
+                    Key.add('cli', data, keyring=kernel_keyring_id)
                 # use gnome-keyring or KDE-Wallet
                 # try:
                 #     import gi
