@@ -99,7 +99,8 @@ def _load_tokens_from_file(file_path):
     try:
         data = '[]'
         if platform == "win32":
-            import win32crypt  # pylint: disable=import-error
+            # pylint: disable=import-error,c-extension-no-member
+            import win32crypt
             if os.path.isfile(file_path):
                 with open(file_path, 'rb') as token_file:
                     blob = token_file.read()
@@ -112,23 +113,30 @@ def _load_tokens_from_file(file_path):
             except Exception as ex:  # pylint: disable=broad-except
                 logger.warning('loading from keychain failed for "%s"', ex)
         else:
+            from keyctl import Key
+            from keyctl.keyctlwrapper import KeyNotExistError
             try:
-                import gi
-                gi.require_version('Secret', '1')
-                from gi.repository import Secret
-                EXAMPLE_SCHEMA = Secret.Schema.new(
-                    "2.cli.azure", Secret.SchemaFlags.NONE,
-                    {
-                        "string": Secret.SchemaAttributeType.STRING
-                    }
-                )
-                data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, {"string": "cred"}, None)
-            except ImportError:
-                import keyring
-                try:
-                    data = keyring.get_password('cli', 'cred')
-                except Exception as ex:  # pylint: disable=broad-except
-                    logger.warning('loading from keychain failed for "%s"', ex)
+                data = Key.search('cli').data
+            except KeyNotExistError:
+                pass
+
+            # try:
+            #     import gi
+            #     gi.require_version('Secret', '1')
+            #     from gi.repository import Secret
+            #     EXAMPLE_SCHEMA = Secret.Schema.new(
+            #         "2.cli.azure", Secret.SchemaFlags.NONE,
+            #         {
+            #             "string": Secret.SchemaAttributeType.STRING
+            #         }
+            #     )
+            #     data = Secret.password_lookup_sync(EXAMPLE_SCHEMA, {"string": "cred"}, None)
+            # except ImportError:
+            #     import keyring
+            #     try:
+            #         data = keyring.get_password('cli', 'cred')
+            #     except Exception as ex:  # pylint: disable=broad-except
+            #         logger.warning('loading from keychain failed for "%s"', ex)
 
         return shell_safe_json_parse(data) if data else []
     except (CLIError, ValueError) as ex:
@@ -880,7 +888,8 @@ class CredsCache(object):
             all_creds.extend(self._service_principal_creds)
             data = json.dumps(all_creds)
             if platform == 'win32':
-                import win32crypt  # pylint: disable=import-error
+                # pylint: disable=import-error,c-extension-no-member
+                import win32crypt
                 with open(self._token_file, 'wb') as cred_file:
                     data = data.encode('utf8')
                     blob = win32crypt.CryptProtectData(data, None, None, None, None, 0)
@@ -889,17 +898,25 @@ class CredsCache(object):
                 import keyring
                 keyring.set_password('cli', 'cred', data)
             else:
-                try:
-                    import gi
-                    gi.require_version('Secret', '1')
-                    from gi.repository import Secret
-                    EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure", Secret.SchemaFlags.NONE,
-                                                       {"string": Secret.SchemaAttributeType.STRING})
-                    Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT,
-                                               'theLabel', data, None)
-                except ImportError:
-                    import keyring
-                    keyring.set_password('cli', 'cred', data)
+                from keyctl import Key
+                import subprocess
+                # TODO: handle bytes
+                kernel_keyring_id = subprocess.check_output(['keyctl', 'get_persistent', '@u']).rstrip()
+
+                Key.add('cli', data, keyring=kernel_keyring_id)
+
+                # use gnome-keyring or KDE-Wallet
+                # try:
+                #     import gi
+                #     gi.require_version('Secret', '1')
+                #     from gi.repository import Secret
+                #     EXAMPLE_SCHEMA = Secret.Schema.new("2.cli.azure", Secret.SchemaFlags.NONE,
+                #                                        {"string": Secret.SchemaAttributeType.STRING})
+                #     Secret.password_store_sync(EXAMPLE_SCHEMA, {"string": "cred"}, Secret.COLLECTION_DEFAULT,
+                #                                'theLabel', data, None)
+                # except ImportError:
+                #     import keyring
+                #     keyring.set_password('cli', 'cred', data)
 
     def retrieve_token_for_user(self, username, tenant, resource):
         context = self._auth_ctx_factory(self._ctx, tenant, cache=self.adal_token_cache)
