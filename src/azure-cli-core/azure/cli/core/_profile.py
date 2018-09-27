@@ -5,6 +5,7 @@
 
 from __future__ import print_function
 
+import base64
 import collections
 import errno
 import json
@@ -120,6 +121,8 @@ def _load_tokens_from_file(file_path):
             kernel_keyring_id = subprocess.check_output(['keyctl', 'get_persistent', '@u']).rstrip()
             try:
                 data = Key.search('cli', keyring=kernel_keyring_id).data
+                data = base64.b64decode(data)
+                #print('>>>READ TOKENS:' + data )
             except KeyNotExistError:
                 pass
 
@@ -908,9 +911,22 @@ class CredsCache(object):
 
                 try:
                     key_id = Key.search('cli', keyring=kernel_keyring_id).id
-                    Key(key_id).update(data)
+                    #print('found it')
+                    key = Key(keyid=key_id, keyring=kernel_keyring_id)
+                    #print('try to update it')  
+                    key.delete()
+                    print('done') 
                 except KeyNotExistError:
-                    Key.add('cli', data, keyring=kernel_keyring_id)
+                    pass
+                data = base64.b64encode(data)
+ 
+                # not working!!!
+                #print(str(len(data)) + ' ' + data)
+                #Key.add('cli', data, keyring=kernel_keyring_id)
+
+
+                txt = subprocess.check_output(['keyctl', 'add', 'user', 'cli' , data, kernel_keyring_id])
+                print(txt)
                 # use gnome-keyring or KDE-Wallet
                 # try:
                 #     import gi
