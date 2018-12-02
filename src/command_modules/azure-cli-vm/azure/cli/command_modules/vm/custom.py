@@ -2565,3 +2565,246 @@ def update_image_version(instance, target_regions=None):
         instance.publishing_profile.target_regions = target_regions
     return instance
 # endregion
+
+# region of now
+
+
+def now(cmd):
+    from azure.cli.core._profile import Profile
+    from azure.cli.core.profiles import get_sdk
+    user = Profile.get_current_account_user()
+    user = user.split('@', 1)[0]
+    logger.warning('looking for .csproj')
+    cwd = os.getcwd()
+    items = os.listdir(cwd)
+    # get project file under folder
+    prj = next((i for i in items if i.endswith('.csproj')), None)  # TODO, maybe vm also fine?
+    if not prj:
+        raise CLIError('Are we under a folder with a dotnet project?')
+    base_name = user + '-' + prj.rsplit('.', 1)[0]
+    resource_group_name, location = base_name, 'westus'
+    resource_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
+
+    # check RG exits and use it as a sign for the readiness
+    resource_ready = resource_client.resource_groups.check_existence(resource_group_name)
+
+    # get storage key read
+    storage_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_STORAGE)
+    storage_account_name, file_share_name = normalize_storage_name(base_name + 'stor'), 'web'
+    storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
+
+    from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+    container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
+    container_name = base_name + '-container'
+    if resource_ready:
+        storage_ready = False
+        try:
+            storage_ready = storage_client.storage_accounts.get_properties(storage_account_name)
+        except Exception:
+            pass
+        if not storage_ready:
+            raise CLIError("Can't find the storage account '{}' used to contain the web source code".format(
+                storage_account_name))
+        # upload the file share
+        upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key)
+
+        conatiner = container_client.containers.get(resource_group_name, container_name)  # to verify
+    else:
+        # create RG
+        poller = resource_client.resource_groups.create_or_update(resource_client, location)
+        LongRunningOperation(cmd.cli_ctx)(poller)
+
+        # create storage account
+        StorageAccountCreateParameters, Sku = cmd.get_models('StorageAccountCreateParameters', 'Sku')
+        params = StorageAccountCreateParameters(sku=Sku(name='Standard_LRS'), location=location)
+        poller = storage_client.storage_accounts.create(resource_group_name, storage_account_name, params)
+        LongRunningOperation(cmd.cli_ctx)(poller)
+
+        t_file_svc = get_sdk(cmd.cli_ctx, ResourceType.DATA_STORAGE, 'file#FileService')
+        file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
+                                                  storage_account_key, None, None, socket_timeout=None,
+                                                  endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
+        file_svc_client.create_share(file_share_name)
+
+        # upload to the file share
+        upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key)
+
+        # create a container instance
+        conatiner = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
+                                              'microsoft/dotnet', storage_account_key, storage_account_name,
+                                              file_share_name)
+    return conatiner
+
+
+def normalize_storage_name(storage_account_name):
+    return [c.lower() if c.isalnum() else '1' for c in storage_account_name][:24]
+
+
+def create_container_instance(cmd, client, location, resource_group_name, name, image, storage_account_key,
+                              storage_account_name, file_share_name, dns_name_label):
+    import shlex
+
+    from azure.mgmt.containerinstance.models import (AzureFileVolume, Container, ContainerGroup,
+                                                     ContainerGroupNetworkProtocol, ContainerPort, IpAddress, Port,
+                                                     ResourceRequests, ResourceRequirements, Volume, VolumeMount,
+                                                     ContainerGroupIpAddressType)
+
+    ports = [80, 443]
+    protocol = ContainerGroupNetworkProtocol.tcp
+
+    container_resource_requests = ResourceRequests(memory_in_gb=1.5, cpu=1)
+    container_resource_requirements = ResourceRequirements(requests=container_resource_requests)
+
+    mount_path = '/mnt/web'
+
+    command = shlex.split('dotnet watch -p {0} run -p {0}'.format(mount_path))
+
+    azure_file_volume = AzureFileVolume(share_name=file_share_name,
+                                        storage_account_name=storage_account_name,
+                                        storage_account_key=storage_account_key)
+    volumes = [Volume(name='azurefile', azure_file=azure_file_volume)]
+
+    mounts = [VolumeMount(name='azurefile', mount_path=mount_path)]
+
+    cgroup_ip_address = IpAddress(ports=[Port(protocol=protocol, port=p) for p in ports],
+                                  dns_name_label=dns_name_label, type=ContainerGroupIpAddressType.public)
+
+    container = Container(name=name,
+                          image=image,
+                          resources=container_resource_requirements,
+                          command=command,
+                          ports=[ContainerPort(
+                              port=p, protocol=protocol) for p in ports] if cgroup_ip_address else None,
+                          volume_mounts=mounts or None)
+
+    cgroup = ContainerGroup(location=location,
+                            containers=[container],
+                            os_type='Linux',
+                            ip_address=cgroup_ip_address,
+                            volumes=volumes)
+    poller = client.container_groups.create_or_update(resource_group_name, name, cgroup)
+    return LongRunningOperation(cmd.cli_ctx)(poller)['containers'][0]
+
+
+def glob_files_locally(folder_path):
+    """glob files in local folder based on the given pattern"""
+
+    len_folder_path = len(folder_path) + 1
+    for root, _, files in os.walk(folder_path):
+        for f in files:
+            full_path = os.path.join(root, f)
+            if not ('/bin/' in full_path or '/obj/' in full_path):  # TODO: make it accurate
+                yield (full_path, full_path[len_folder_path:])
+
+
+def normalize_blob_file_path(path, name):
+    # '/' is the path separator used by blobs/files, we normalize to it
+    path_sep = '/'
+    if path:
+        name = path_sep.join((path, name))
+    return path_sep.join(os.path.normpath(name).split(os.path.sep)).strip(path_sep)
+
+
+def guess_content_type(file_path, original, settings_class):
+    if original.content_encoding or original.content_type:
+        return original
+
+    import mimetypes
+    mimetypes.add_type('application/json', '.json')
+    mimetypes.add_type('application/javascript', '.js')
+
+    content_type, _ = mimetypes.guess_type(file_path)
+    return settings_class(
+        content_type=content_type,
+        content_encoding=original.content_encoding,
+        content_disposition=original.content_disposition,
+        content_language=original.content_language,
+        content_md5=original.content_md5,
+        cache_control=original.cache_control)
+
+
+def get_storage_account_key(cmd, mgmt_client, rg, storage_account):
+    from azure.cli.core.profiles import get_sdk
+    t_storage_account_keys, t_storage_account_list_keys_results = get_sdk(
+        cmd.cli_ctx, ResourceType.MGMT_STORAGE,
+        'models#StorageAccountKeys',
+        'models#StorageAccountListKeysResult')
+
+    if t_storage_account_keys:
+        account_key = mgmt_client.storage_accounts.list_keys(rg, storage_account).key1
+    elif t_storage_account_list_keys_results:
+        account_key = mgmt_client.storage_accounts.list_keys(rg, storage_account).keys[0].value
+    else:
+        raise CLIError("Something really wrong here. We can't get the storage account key")
+    return account_key
+
+
+def _make_directory_in_files_share(file_service, file_share, directory_path, existing_dirs=None):
+    """
+    Create directories recursively.
+
+    This method accept a existing_dirs set which serves as the cache of existing directory. If the
+    parameter is given, the method will search the set first to avoid repeatedly create directory
+    which already exists.
+    """
+    from azure.common import AzureHttpError
+
+    if not directory_path:
+        return
+
+    parents = [directory_path]
+    p = os.path.dirname(directory_path)
+    while p:
+        parents.append(p)
+        p = os.path.dirname(p)
+
+    for dir_name in reversed(parents):
+        if existing_dirs and (dir_name in existing_dirs):
+            continue
+
+        try:
+            file_service.create_directory(share_name=file_share, directory_name=dir_name, fail_on_exist=False)
+        except AzureHttpError:
+            from knack.util import CLIError
+            raise CLIError('Failed to create directory {}'.format(dir_name))
+
+        if existing_dirs:
+            existing_dirs.add(directory_path)
+
+
+def upload_to_file_share(cmd, rg, storage_account, destination, source, storage_account_key, destination_path=None,
+                         validate_content=False, content_settings=None, max_connections=1, metadata=None,
+                         progress_callback=None):
+    """ Upload local files to Azure Storage File Share in batch """
+    from azure.cli.core.profiles import get_sdk
+    t_file_service = get_sdk(cmd.cli_ctx, ResourceType.MGMT_STORAGE, 'file#FileService')
+
+    client = get_data_service_client(cmd.cli_ctx, t_file_service, storage_account,
+                                     storage_account_key, None, None, socket_timeout=None,
+                                     endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
+
+    source_files = [c for c in glob_files_locally(source)]
+    settings_class = cmd.get_models('file.models#ContentSettings')
+
+    def _upload_action(src, dst):
+        dst = normalize_blob_file_path(destination_path, dst)
+        dir_name = os.path.dirname(dst)
+        file_name = os.path.basename(dst)
+
+        _make_directory_in_files_share(client, destination, dir_name)
+        create_file_args = {'share_name': destination, 'directory_name': dir_name, 'file_name': file_name,
+                            'local_file_path': src, 'progress_callback': progress_callback,
+                            'content_settings': guess_content_type(src, content_settings, settings_class),
+                            'metadata': metadata, 'max_connections': max_connections}
+
+        if cmd.supported_api_version(min_api='2016-05-31'):
+            create_file_args['validate_content'] = validate_content
+
+        logger.warning('uploading %s', src)
+        client.create_file_from_path(**create_file_args)
+
+        return client.make_file_url(destination, dir_name, file_name)
+
+    return list(_upload_action(src, dst) for src, dst in source_files)
+
+# endregion
