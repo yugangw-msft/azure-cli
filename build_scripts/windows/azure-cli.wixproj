@@ -7,6 +7,7 @@
     <WixTargetsPath>$(WixToolPath)Wix.targets</WixTargetsPath>
     <WixTasksPath>wixtasks.dll</WixTasksPath>
     <AzureCliSource>artifacts\cli</AzureCliSource>
+	  <SyncTool>sync_tool</SyncTool>
     <LinkerAdditionalOptions>-fv</LinkerAdditionalOptions>
   </PropertyGroup>
   <!-- Project -->
@@ -24,12 +25,12 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
     <OutputPath>out\$(Configuration)\</OutputPath>
     <IntermediateOutputPath>out\obj\$(Configuration)\</IntermediateOutputPath>
-    <DefineConstants>Debug;AzureCliSource=$(AzureCliSource)</DefineConstants>
+    <DefineConstants>Debug;AzureCliSource=$(AzureCliSource);SyncTool=$(SyncTool)</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
     <OutputPath>out\</OutputPath>
     <IntermediateOutputPath>out\obj\$(Configuration)\</IntermediateOutputPath>
-    <DefineConstants>AzureCliSource=$(AzureCliSource)</DefineConstants>
+    <DefineConstants>AzureCliSource=$(AzureCliSource);SyncTool=$(SyncTool)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="out\azure-cli.wxs">
@@ -49,6 +50,7 @@
   </ItemGroup>
   <Import Project="$(WixTargetsPath)" />
   <Target Name="BeforeBuild">
-    <HeatDirectory Directory="$(AzureCliSource)" ToolPath="$(WixToolPath)" AutogenerateGuids="true" ComponentGroupName="AzureCliComponentGroup" SuppressRootDirectory="true" DirectoryRefId="DynamicCliDir" OutputFile="out\azure-cli.wxs" PreprocessorVariable="var.AzureCliSource" />
+    <HeatDirectory Directory="$(AzureCliSource)" ToolPath="$(WixToolPath)" AutogenerateGuids="true" ComponentGroupName="AzureCliComponentGroup" SuppressRootDirectory="true"
+		DirectoryRefId="DynamicCliDir" OutputFile="out\azure-cli.wxs" PreprocessorVariable="var.AzureCliSource" />
   </Target>
 </Project>

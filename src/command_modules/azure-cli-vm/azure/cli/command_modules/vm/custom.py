@@ -2562,3 +2562,330 @@ def update_image_version(instance, target_regions=None, replica_count=None):
         instance.publishing_profile.replica_count = replica_count
     return instance
 # endregion
+
+# region of now
+def _get_infra_names():
+    from azure.cli.core._profile import Profile  # todo perf
+    user = Profile().get_current_account_user()
+    user = user.split('@', 1)[0]
+    # logger.warning('looking for .csproj')
+    cwd = os.environ.get('NOW_TEST_DIR') or os.getcwd()
+    from os.path import basename
+    prj = basename(cwd)
+    base_name = user + '-' + prj.rsplit('.', 1)[0]
+    return cwd, base_name, base_name, 'eastus2'
+
+
+def down(cmd):
+    from msrestazure.azure_exceptions import CloudError
+    _, base_name, resource_group_name, _ = _get_infra_names()
+    from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+    container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
+    container_name = (base_name + '-container').lower()[:63]
+    try:
+        container_group = container_client.container_groups.get(resource_group_name, container_name)
+    except CloudError:
+        logger.warning('Nothing to clean up')
+        return
+    logger.warning('Deleting %s', container_name)
+    container_client.container_groups.delete(resource_group_name, container_name)
+    
+
+def up(cmd, launch_browser=None, attach=None, ports=None):
+    import time
+    from msrestazure.azure_exceptions import CloudError
+    from azure.cli.core.profiles import get_sdk
+
+    cwd, base_name, resource_group_name, location = _get_infra_names()
+    ports = ports or [80]
+    ports.append(50051)
+    items = os.listdir(cwd)
+    aznow_json = os.path.join(cwd, 'aznow.json')
+    aznow_json_exists = os.path.exists(aznow_json)
+    if next((f for f in items if f.endswith('.csproj') or f.endswith('.vbproj')), None):
+        image = 'neverland123/agent:dotnet-slim'
+        if not aznow_json_exists:
+            with open(aznow_json, 'w') as file_handler:
+                file_handler.write(json.dumps({
+                    "sourceDirectory": "",
+                    "commandTriggerDirectory": "bin",
+                    "targetDirectory": "/az-app",
+                    "runCommands" : [
+                        {"command": ["dotnet", "restore"]},
+                        {"command": ["dotnet", "run", "--no-launch-profile"]}
+                    ],
+                    "cleanupProcesses" : ["dotnet"],
+                    "useIgnoreRules": ["docker"]
+                }))
+    elif next((f for f in items if f.endswith('package.json') or f.endswith('node_modules'))):
+        image = 'neverland123/agent:node-slim'
+        if not aznow_json_exists:
+            with open(aznow_json, 'w') as file_handler:
+                file_handler.write(json.dumps({
+                    "targetDirectory": "/az-app",
+                    "runCommands": [
+                        {
+                            "glob": "package.json",
+                            "command": ["npm", "update"]
+                        },
+                        {
+                            "command": ["npm", "start"]
+                        }
+                    ],
+                    "cleanupProcesses": ["node"],
+                    "useIgnoreRules": ["docker", "nodejs"]
+                }))
+    else:
+        raise CLIError("Can't find right code projects for .NET or NodeJS")
+    os.chdir(cwd)
+
+    # get project file under folder
+    from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+    container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
+    container_name = (base_name + '-container').lower()[:63]
+    try:
+        container_group = container_client.container_groups.get(resource_group_name, container_name)
+    except CloudError:
+        container_group = None
+    if not container_group:
+        # create RG
+        logger.warning('One time configuration...')
+        logger.warning('    Creating a resource group "%s"', resource_group_name)
+
+        resource_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
+        t_resource_group = get_sdk(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES,
+                                   'models#ResourceGroup')
+        t = time.time()
+        resource_client.resource_groups.create_or_update(resource_group_name,
+                                                         t_resource_group(location=location))
+        logger.warning('    Done (%s sec)', int(time.time()-t))
+        # create a container instance
+        t = time.time()
+        logger.warning('Provisioned a container instance "%s" with image of "%s"', container_name, image)
+        container_group = create_container_instance(cmd, container_client, location, resource_group_name,
+                                                    container_name, image, base_name, ports)
+        logger.warning('Done (%s sec)', int(time.time()-t))
+        container = container_group.containers[0]
+        if container.instance_view.current_state.state == 'Error':
+            log = container_client.container.list_logs(resource_group_name, container_name, container_name)
+            raise CLIError(log.content)
+
+    fqdn = container_group.ip_address.fqdn
+    site_url = 'http://{}:{}'.format(fqdn, ports[0])  #  Get port?
+    logger.warning('Site uri: %s %s', site_url, 'Let us Launch it in browser...' if launch_browser else '')
+    if launch_browser:
+        from azure.cli.core.util import open_page_in_browser
+        open_page_in_browser(site_url)
+
+    result, _ = sync_code(cwd, container_group.ip_address.ip, attach=True)
+    if not result:
+        import time
+        logger.warning('connection error occurred, retry one more time')
+        time.sleep(3)
+        result, output = sync_code(cwd, container_group.ip_address.ip, attach=True)
+        if not result:
+            raise CLIError(output)
+    #if attach:
+    #    logger.warning('Attaching to standard output and error streams...')
+    #    attach_to_container(container_client, resource_group_name, container_name, container_name)
+
+
+def sync_code(cwd, public_ip, attach):
+    from subprocess import Popen, PIPE
+    import shlex
+    root_folder = os.environ.get('ProgramFiles(x86)') or os.environ.get('ProgramW6432')
+    sync_tool = os.path.join(root_folder, r'Microsoft SDKs\Azure\CLI2\sync_tool\aznow.exe')
+    cmd = '"{}" deploy --host {} --port 50051'.format(sync_tool, public_ip)
+
+    process = Popen(shlex.split(cmd), stdout=PIPE)
+    result = True 
+    while True:
+        output = process.stdout.readline().decode()
+        if output:
+            output = output.strip()
+            if 'System.Net.Http.HttpRequestException' in output:
+                process.kill()
+                result = False
+                break            
+            print(output)
+            if not attach and 'File synchronization succeeded' in output:
+                process.kill()
+                break
+
+    return result, output
+
+    #(out, err) = process.communicate()
+    #  TODO: 1. exit code from the npm or dotnet and verify we capture all provision errors
+    #        2. output the npm/dotnet logs 
+    #        3. Corss check skip the right files
+    #        4. Port
+
+
+def attach_to_container(container_client, resource_group_name, name, container_name=None):
+    """Attach to a container. """
+    container_group_client = container_client.container_groups
+    container_group = container_group_client.get(resource_group_name, name)
+
+    # If container name is not present, use the first container.
+    if container_name is None:
+        container_name = container_group.containers[0].name
+
+    _start_streaming(
+        terminate_condition=_is_container_terminated,
+        terminate_condition_args=(container_group_client, resource_group_name, name, container_name),
+        shupdown_grace_period=5,
+        stream_target=_stream_container_events_and_logs,
+        stream_args=(container_group_client, container_client.container, resource_group_name, name, container_name))
+
+
+def _start_streaming(terminate_condition, terminate_condition_args, shupdown_grace_period, stream_target, stream_args):
+    """Start streaming for the stream target. """
+    import colorama
+    import threading
+    import time
+    colorama.init()
+
+    try:
+        t = threading.Thread(target=stream_target, args=stream_args)
+        t.daemon = True
+        t.start()
+
+        while not terminate_condition(*terminate_condition_args) and t.is_alive():
+            time.sleep(10)
+
+        time.sleep(shupdown_grace_period)
+
+    finally:
+        colorama.deinit()
+
+
+def _stream_logs(client, resource_group_name, name, container_name, restart_policy):
+    """Stream logs for a container. """
+    import time
+    lastOutputLines = 0
+    while True:
+        log = client.list_logs(resource_group_name, name, container_name)
+        lines = log.content.split('\n')
+        currentOutputLines = len(lines)
+
+        # Should only happen when the container restarts.
+        if currentOutputLines < lastOutputLines and restart_policy != 'Never':
+            print("Warning: you're having '--restart-policy={}'; the container '{}' was just restarted;"
+                  " the tail of the current log might be missing. Exiting...".format(restart_policy, container_name))
+            break
+
+        _move_console_cursor_up(lastOutputLines)
+        print(log.content)
+
+        lastOutputLines = currentOutputLines
+        time.sleep(2)
+
+
+def _stream_container_events_and_logs(container_group_client, container_client, resource_group_name,
+                                      name, container_name):
+    """Stream container events and logs. """
+    import time
+    lastOutputLines = 0
+    lastContainerState = None
+
+    while True:
+        container_group, container = _find_container(container_group_client, resource_group_name, name, container_name)
+
+        container_state = 'Unknown'
+        if (container.instance_view and container.instance_view.current_state and
+                container.instance_view.current_state.state):
+            container_state = container.instance_view.current_state.state
+
+        _move_console_cursor_up(lastOutputLines)
+        if container_state != lastContainerState:
+            print("Container '{}' is in state '{}'...".format(container_name, container_state))
+
+        currentOutputLines = 0
+        if container.instance_view and container.instance_view.events:
+            for event in sorted(container.instance_view.events, key=lambda e: e.last_timestamp):
+                print('(count: {}) (last timestamp: {}) {}'.format(event.count, event.last_timestamp, event.message))
+                currentOutputLines += 1
+
+        lastOutputLines = currentOutputLines
+        lastContainerState = container_state
+
+        if container_state == 'Running':
+            print('\nStart streaming logs:')
+            break
+
+        time.sleep(2)
+
+    _stream_logs(container_client, resource_group_name, name, container_name, container_group.restart_policy)
+
+
+def _is_container_terminated(client, resource_group_name, name, container_name):
+    """Check if a container should be considered terminated. """
+    container_group, container = _find_container(client, resource_group_name, name, container_name)
+
+    # If a container group is terminated, assume the container is also terminated.
+    if container_group.instance_view and container_group.instance_view.state:
+        if container_group.instance_view.state == 'Succeeded' or container_group.instance_view.state == 'Failed':
+            return True
+
+    # If the restart policy is Always, assume the container will be restarted.
+    if container_group.restart_policy:
+        if container_group.restart_policy == 'Always':
+            return False
+
+    # Only assume the container is terminated if its state is Terminated.
+    if (container.instance_view and container.instance_view.current_state and
+            container.instance_view.current_state.state == 'Terminated'):
+        return True
+
+    return False
+
+
+def _find_container(client, resource_group_name, name, container_name):
+    """Find a container in a container group. """
+    container_group = client.get(resource_group_name, name)
+    containers = [c for c in container_group.containers if c.name == container_name]
+
+    if len(containers) != 1:
+        raise CLIError("Found 0 or more than 1 container with name '{}'".format(container_name))
+
+    return container_group, containers[0]
+
+
+def _move_console_cursor_up(lines):
+    """Move console cursor up. """
+    import sys
+    if lines > 0:
+        # Use stdout.write to support Python 2
+        sys.stdout.write('\033[{}A\033[K\033[J'.format(lines))
+
+
+def create_container_instance(cmd, client, location, resource_group_name, name, image, dns_name_label, ports):
+    from azure.mgmt.containerinstance.models import (Container, ContainerGroup, ContainerGroupNetworkProtocol,
+                                                     ContainerPort, IpAddress, Port, ResourceRequests,
+                                                     ResourceRequirements, ContainerGroupIpAddressType)
+
+    protocol = ContainerGroupNetworkProtocol.tcp
+
+    container_resource_requests = ResourceRequests(memory_in_gb=1.5, cpu=1)
+    container_resource_requirements = ResourceRequirements(requests=container_resource_requests)
+
+    cgroup_ip_address = IpAddress(ports=[Port(protocol=protocol, port=p) for p in ports],
+                                  dns_name_label=dns_name_label, type=ContainerGroupIpAddressType.public)
+
+    container = Container(name=name,
+                          image=image,
+                          resources=container_resource_requirements,
+                          ports=[ContainerPort(
+                              port=p, protocol=protocol) for p in ports] if cgroup_ip_address else None)
+
+    cgroup = ContainerGroup(location=location,
+                            containers=[container],
+                            os_type='Linux',
+                            ip_address=cgroup_ip_address,
+                            restart_policy='Always')
+    client.config.long_running_operation_timeout = 10
+    poller = client.container_groups.create_or_update(resource_group_name, name, cgroup)
+    return LongRunningOperation(cmd.cli_ctx)(poller)
+
+
+# endregion

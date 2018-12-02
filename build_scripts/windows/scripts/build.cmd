@@ -38,6 +38,9 @@ if exist %BUILDING_DIR% (
 )
 mkdir %BUILDING_DIR%
 
+mkdir %BUILDING_DIR%\sync_tool
+xcopy %~dp0..\sync_tool %BUILDING_DIR%\sync_tool /S
+
 if exist %TEMP_SCRATCH_FOLDER% rmdir /s /q %TEMP_SCRATCH_FOLDER%
 if exist %TEMP_SCRATCH_FOLDER% (
     echo Failed to delete %TEMP_SCRATCH_FOLDER%.

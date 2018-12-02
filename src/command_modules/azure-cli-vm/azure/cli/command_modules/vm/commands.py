@@ -359,3 +359,7 @@ def load_command_table(self, _):
         g.custom_command('create', 'create_image_version', supports_no_wait=True)
         g.generic_update_command('update', setter_arg_name='gallery_image_version', custom_func_name='update_image_version', supports_no_wait=True)
         g.wait_command('wait')
+
+    with self.command_group('', compute_custom) as g:
+        g.custom_command('up', 'up')
+        g.custom_command('down', 'down')
