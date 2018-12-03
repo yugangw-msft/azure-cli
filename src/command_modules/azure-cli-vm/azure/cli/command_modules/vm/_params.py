@@ -577,6 +577,9 @@ def load_arguments(self, _):
         with self.argument_context(scope) as c:
             c.argument('target_regions', nargs='*', validator=process_gallery_image_version_namespace,
                        help='space separated region list, use "<region>=<replicate count>" to apply region specific replicate count')
+
+    with self.argument_context('now') as c:
+        c.argument('launch_browser', action='store_true', help='launch browser after deployment')
     # endregion
 
 
