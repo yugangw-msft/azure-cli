@@ -2577,6 +2577,13 @@ def now(cmd, launch_browser=None):
     # logger.warning('looking for .csproj')
     cwd = os.environ.get('NOW_TEST_DIR') or os.getcwd()
     items = os.listdir(cwd)
+    dotnet, python = None, None
+    dotnet = next((f for f in items if f.endswith('.csproj') or f.endswith('.vbproj')), None)
+    if not dotnet:
+        python = next((f for f in items if f.endswith('.py')), None)
+    if not dotnet and not python:
+        raise CLIError("Can't find right code projects for Python or Donnet.")
+
     # get project file under folder
     from os.path import basename
     prj = basename(cwd)
@@ -2640,11 +2647,18 @@ def now(cmd, launch_browser=None):
                              client=file_svc_client)
 
         # create a container instance
-        image = 'microsoft/dotnet'
+        image = 'microsoft/dotnet' if dotnet else 'tiangolo/uwsgi-nginx-flask'
+        env_vars = []
+        if python:
+            env_vars = [
+                { 'name': 'FLASK_DEBUG', 'value': '1' },
+                { 'name': 'FLASK_APP', 'value': '/mnt/web/app.py' }  # TODO, find the righ start file.
+            ]
         logger.warning('Provisioning a container instance "%s" with image of "%s"', container_name, image)
         conatiner = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
                                               image, storage_account_key, storage_account_name,
-                                              file_share_name, base_name)
+                                              file_share_name, base_name, env_vars, is_dotnet=dotnet,
+                                              extra_ports=[] if dotnet else [5000])  # TODO, make it simple
 
     fqdn = conatiner.ip_address.fqdn
     logger.warning('Site is ready: %s', fqdn)
@@ -2658,15 +2672,17 @@ def normalize_storage_name(storage_account_name):
 
 
 def create_container_instance(cmd, client, location, resource_group_name, name, image, storage_account_key,
-                              storage_account_name, file_share_name, dns_name_label):
+                              storage_account_name, file_share_name, dns_name_label, environment_variables,
+                              is_dotnet=True, extra_ports=[]):
     import shlex
 
     from azure.mgmt.containerinstance.models import (AzureFileVolume, Container, ContainerGroup,
                                                      ContainerGroupNetworkProtocol, ContainerPort, IpAddress, Port,
                                                      ResourceRequests, ResourceRequirements, Volume, VolumeMount,
-                                                     ContainerGroupIpAddressType)
+                                                     ContainerGroupIpAddressType, EnvironmentVariable)
 
     ports = [80, 443]
+    ports += extra_ports
     protocol = ContainerGroupNetworkProtocol.tcp
 
     container_resource_requests = ResourceRequests(memory_in_gb=1.5, cpu=1)
@@ -2674,7 +2690,10 @@ def create_container_instance(cmd, client, location, resource_group_name, name, 
 
     mount_path = '/mnt/web'
 
-    command = shlex.split('dotnet watch -p {0} run -p {0}'.format(mount_path))
+    if is_dotnet:
+        command = shlex.split('dotnet watch -p {0} run -p {0}'.format(mount_path))
+    else:
+        command = shlex.split('flask run --host=0.0.0.0')
 
     azure_file_volume = AzureFileVolume(share_name=file_share_name,
                                         storage_account_name=storage_account_name,
@@ -2692,6 +2711,7 @@ def create_container_instance(cmd, client, location, resource_group_name, name, 
                           command=command,
                           ports=[ContainerPort(
                               port=p, protocol=protocol) for p in ports] if cgroup_ip_address else None,
+                          environment_variables=environment_variables,
                           volume_mounts=mounts or None)
 
     cgroup = ContainerGroup(location=location,
@@ -2712,8 +2732,9 @@ def glob_files_locally(folder_path):
     for root, _, files in os.walk(folder_path):
         for f in files:
             full_path = os.path.join(root, f)
-            if not ('/bin/' in full_path or '/obj/' in full_path or '\\bin\\' in full_path or 
-                    '\\obj\\' in full_path or full_path.endswith('launchSettings.json')):  # TODO: make it accurate
+            banned = ['/bin/', '/obj/', '\\bin\\', '\\obj\\', 'launchSettings.json', '__pycache__', '\\env\\', '/env/']
+
+            if not [x for x in banned if x in full_path]:  # TODO: make it accurate
                 yield (full_path, full_path[len_folder_path:])
 
 
