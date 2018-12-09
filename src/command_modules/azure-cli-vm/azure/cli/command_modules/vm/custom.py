@@ -2624,41 +2624,54 @@ def now(cmd, launch_browser=None):
         resource_client.resource_groups.create_or_update(resource_group_name,
                                                          t_resource_group(location=location))
         # create storage account
-        logger.warning('    Creating a storage account "%s"', storage_account_name)
+        # logger.warning('    Creating a storage account "%s"', storage_account_name)
 
-        StorageAccountCreateParameters, Sku, Kind = cmd.get_models('StorageAccountCreateParameters', 'Sku',
-                                                                   'Kind', resource_type=ResourceType.MGMT_STORAGE)
-        params = StorageAccountCreateParameters(sku=Sku(name='Standard_LRS'), kind=Kind('Storage'), location=location)
-        poller = storage_client.storage_accounts.create(resource_group_name, storage_account_name, params)
-        LongRunningOperation(cmd.cli_ctx)(poller)
+        # StorageAccountCreateParameters, Sku, Kind = cmd.get_models('StorageAccountCreateParameters', 'Sku',
+        #                                                            'Kind', resource_type=ResourceType.MGMT_STORAGE)
+        # params = StorageAccountCreateParameters(sku=Sku(name='Standard_LRS'), kind=Kind('Storage'), location=location)
+        # poller = storage_client.storage_accounts.create(resource_group_name, storage_account_name, params)
+        # LongRunningOperation(cmd.cli_ctx)(poller)
 
-        storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
+        # storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
 
-        t_file_svc = get_sdk(cmd.cli_ctx, ResourceType.DATA_STORAGE, 'file#FileService')
-        file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
-                                                  storage_account_key, None, None, socket_timeout=None,
-                                                  endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
-        logger.warning('    Creating storage file share "%s"', file_share_name)
-        file_svc_client.create_share(file_share_name)
+        # t_file_svc = get_sdk(cmd.cli_ctx, ResourceType.DATA_STORAGE, 'file#FileService')
+        # file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
+        #                                           storage_account_key, None, None, socket_timeout=None,
+        #                                           endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
+        # logger.warning('    Creating storage file share "%s"', file_share_name)
+        # file_svc_client.create_share(file_share_name)
 
         # upload to the file share
-        logger.warning('Uploading source files under "%s" to storage file share', cwd)
-        upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key,
-                             client=file_svc_client)
+        # logger.warning('Uploading source files under "%s" to storage file share', cwd)
+        # upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key,
+        #                      client=file_svc_client)
 
         # create a container instance
-        image = 'microsoft/dotnet' if dotnet else 'tiangolo/uwsgi-nginx-flask'
+        image = 'microsoft/dotnet' if dotnet else 'ygacr1.azurecr.io/myrepo/yugangwsocket-v2:v3'
         env_vars = []
         if python:
             env_vars = [
                 { 'name': 'FLASK_DEBUG', 'value': '1' },
-                { 'name': 'FLASK_APP', 'value': '/mnt/web/app.py' }  # TODO, find the righ start file.
+                { 'name': 'FLASK_APP', 'value': '/app/app.py' }  # TODO, find the righ start file.
             ]
         logger.warning('Provisioning a container instance "%s" with image of "%s"', container_name, image)
         conatiner = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
                                               image, storage_account_key, storage_account_name,
                                               file_share_name, base_name, env_vars, is_dotnet=dotnet,
                                               extra_ports=[] if dotnet else [5000])  # TODO, make it simple
+        ws_uri = 'ws://{}:8000/websocket'.format(container.ip_address.ip)
+        from websocket import create_connection
+        ws = create_connection(ws_uri)
+        with open('/Users/yugangw/now/app.py', 'r') as f:
+            code = f.read()
+            ws.send(code)
+            print("Sent")
+        print("Reeiving...")
+        result =  ws.recv()
+        print("Received '%s'" % result)
+        ws.close()
+        container_exec(cmd,resource_group_name,container_name, 'flask run host=0.0.0.0')
+
 
     fqdn = conatiner.ip_address.fqdn
     logger.warning('Site is ready: %s', fqdn)
@@ -2666,6 +2679,30 @@ def now(cmd, launch_browser=None):
         from azure.cli.core.util import open_page_in_browser
         open_page_in_browser('http://' + fqdn)
 
+
+def container_exec(cmd, resource_group_name, name, exec_command, container_name=None, terminal_row_size=20, terminal_col_size=80):
+    """Start exec for a container. """
+
+    container_client = cf_container(cmd.cli_ctx)
+    container_group_client = cf_container_groups(cmd.cli_ctx)
+    container_group = container_group_client.get(resource_group_name, name)
+
+    if container_name or container_name is None and len(container_group.containers) == 1:
+        # If only one container in container group, use that container.
+        if container_name is None:
+            container_name = container_group.containers[0].name
+
+        terminal_size = ContainerExecRequestTerminalSize(rows=terminal_row_size, cols=terminal_col_size)
+
+        execContainerResponse = container_client.execute_command(resource_group_name, name, container_name, exec_command, terminal_size)
+
+        if platform.system() is WINDOWS_NAME:
+            _start_exec_pipe_win(execContainerResponse.web_socket_uri, execContainerResponse.password)
+        else:
+            _start_exec_pipe(execContainerResponse.web_socket_uri, execContainerResponse.password)
+
+    else:
+        raise CLIError('--container-name required when container group has more than one container.')
 
 def normalize_storage_name(storage_account_name):
     return ''.join([c.lower() if c.isalnum() else '1' for c in storage_account_name][:24])
