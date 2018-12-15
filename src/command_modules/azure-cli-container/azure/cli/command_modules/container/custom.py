@@ -610,13 +610,14 @@ def container_exec(cmd, resource_group_name, name, exec_command, container_name=
         if container_name is None:
             container_name = container_group.containers[0].name
 
-        terminal_size = ContainerExecRequestTerminalSize(rows=terminal_row_size, cols=terminal_col_size)
-
+        #terminal_size = ContainerExecRequestTerminalSize(rows=terminal_row_size, cols=terminal_col_size)
+        terminal_size = ContainerExecRequestTerminalSize(rows=0, cols=0)
         execContainerResponse = container_client.execute_command(resource_group_name, name, container_name, exec_command, terminal_size)
-
+        # raise CLIError(execContainerResponse.web_socket_uri)
         if platform.system() is WINDOWS_NAME:
             _start_exec_pipe_win(execContainerResponse.web_socket_uri, execContainerResponse.password)
         else:
+            pass
             _start_exec_pipe(execContainerResponse.web_socket_uri, execContainerResponse.password)
 
     else:
