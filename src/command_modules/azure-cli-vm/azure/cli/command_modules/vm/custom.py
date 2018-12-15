@@ -2568,8 +2568,7 @@ def update_image_version(instance, target_regions=None):
 
 # region of now
 
-
-def now(cmd, launch_browser=None):
+def up(cmd, launch_browser=None, attach_log=None):
     from azure.cli.core._profile import Profile  # todo perf
     from azure.cli.core.profiles import get_sdk
     user = Profile().get_current_account_user()
@@ -2577,12 +2576,37 @@ def now(cmd, launch_browser=None):
     # logger.warning('looking for .csproj')
     cwd = os.environ.get('NOW_TEST_DIR') or os.getcwd()
     items = os.listdir(cwd)
-    dotnet, python = None, None
-    dotnet = next((f for f in items if f.endswith('.csproj') or f.endswith('.vbproj')), None)
-    if not dotnet:
-        python = next((f for f in items if f.endswith('.py')), None)
-    if not dotnet and not python:
-        raise CLIError("Can't find right code projects for Python or Donnet.")
+    mount_path = '/mnt/web'
+    if next((f for f in items if f.endswith('.csproj') or f.endswith('.vbproj')), None):
+        config = {
+            'image': 'microsoft/dotnet',
+            'cmd': 'dotnet watch -p {0} run -p {0}'.format(mount_path),
+            'foldersToSkip': ['/bin/', '/obj/', '\\bin\\', '\\obj\\', 'launchSettings.json', '.git`']
+        }
+    else:
+        if next((f for f in items if f.endswith('package.json') or f.endswith('node_modules'))):
+            config = {
+                'image': 'node',
+                'ports': [3000],
+                # 'cmd': 'sh -c "npm --prefix {0} install --no-bin-links --no-audit {0} & npm --prefix {0} start {0}"'.format(mount_path),
+                'cmd': 'sh -c "npm --prefix {0} start {0}"'.format(mount_path),
+                'foldersToSkip': ['.git'] # 'node_modules'
+            }
+            #raise CLIError(config['cmd'])
+        else:
+            if next((f for f in items if f.endswith('.py')), None):
+                config = {
+                    'image': 'tiangolo/uwsgi-nginx-flask',
+                    'env_vars': [
+                        {'name': 'FLASK_DEBUG', 'value': '1'},
+                        {'name': 'FLASK_APP', 'value': '{}/app.py'.format(mount_path)}  # TODO, find the righ start file.
+                    ],
+                    'ports': [5000], # need to figure out the right port,
+                    'cmd': 'flask run --host=0.0.0.0',
+                    'foldersToSkip': ['__pycache__', '\\env\\', '/env/']
+                }
+            else:
+                raise CLIError("Can't find right code projects for Python, .NET, or NodeJS")
 
     # get project file under folder
     from os.path import basename
@@ -2596,11 +2620,11 @@ def now(cmd, launch_browser=None):
 
     # get storage key read
     storage_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_STORAGE)
-    storage_account_name, file_share_name = normalize_storage_name(base_name + 'stor'), 'web'
+    storage_account_name, file_share_name = normalize_storage_name(base_name + 'stor'), mount_path.split('/')[-1]
 
     from azure.mgmt.containerinstance import ContainerInstanceManagementClient
     container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
-    container_name = base_name + '-container'
+    container_name = (base_name + '-container').lower()[:63]
     if resource_ready:
         try:
             storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
@@ -2611,9 +2635,10 @@ def now(cmd, launch_browser=None):
                 storage_account_name))
         # upload the file share
         logger.warning('Uploading source files under "%s" to storage file share', cwd)
-        upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key)
+        upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd,
+                             storage_account_key, config['foldersToSkip'])
 
-        conatiner = container_client.container_groups.get(resource_group_name, container_name)  # to verify
+        container_group = container_client.container_groups.get(resource_group_name, container_name)  # to verify
     else:
         # create RG
         logger.warning('One time configuration...')
@@ -2644,42 +2669,178 @@ def now(cmd, launch_browser=None):
         # upload to the file share
         logger.warning('Uploading source files under "%s" to storage file share', cwd)
         upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key,
-                             client=file_svc_client)
+                             client=file_svc_client, foldersToSkip=config['foldersToSkip'])
 
         # create a container instance
-        image = 'microsoft/dotnet' if dotnet else 'tiangolo/uwsgi-nginx-flask'
-        env_vars = []
-        if python:
-            env_vars = [
-                { 'name': 'FLASK_DEBUG', 'value': '1' },
-                { 'name': 'FLASK_APP', 'value': '/mnt/web/app.py' }  # TODO, find the righ start file.
-            ]
-        logger.warning('Provisioning a container instance "%s" with image of "%s"', container_name, image)
-        conatiner = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
-                                              image, storage_account_key, storage_account_name,
-                                              file_share_name, base_name, env_vars, is_dotnet=dotnet,
-                                              extra_ports=[] if dotnet else [5000])  # TODO, make it simple
+        logger.warning('Provisioning a container instance "%s" with image of "%s"', container_name, config.get('image'))
+        container_group = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
+                                                    config.get('image'), storage_account_key, storage_account_name,
+                                                    file_share_name, base_name, config.get('env_vars'), config.get('ports'),
+                                                    config.get('cmd'), mount_path)  # TODO, make it simple
+        container = container_group.containers[0]
+        if container.instance_view.current_state.detail_status == 'Error':
+            log = container_client.container.list_logs(resource_group_name, container_name, container_name)
+            raise CLIError(log.content)
+    
+    fqdn = container_group.ip_address.fqdn
+    site_url = 'http://{}{}'.format(fqdn, '/' + config['ports'][0] if config.get('ports') else '')
+    logger.warning('Site is ready: %s', site_url)
 
-    fqdn = conatiner.ip_address.fqdn
-    logger.warning('Site is ready: %s', fqdn)
     if launch_browser:
         from azure.cli.core.util import open_page_in_browser
-        open_page_in_browser('http://' + fqdn)
+        open_page_in_browser(site_url)
+
+    if attach_log:
+        attach_to_container(container_client, resource_group_name, container_name)
 
 
 def normalize_storage_name(storage_account_name):
     return ''.join([c.lower() if c.isalnum() else '1' for c in storage_account_name][:24])
 
 
+def attach_to_container(container_client, resource_group_name, name, container_name=None):
+    """Attach to a container. """
+    container_group_client = container_client.container_groups
+    container_group = container_group_client.get(resource_group_name, name)
+
+    # If container name is not present, use the first container.
+    if container_name is None:
+        container_name = container_group.containers[0].name
+
+    _start_streaming(
+        terminate_condition=_is_container_terminated,
+        terminate_condition_args=(container_group_client, resource_group_name, name, container_name),
+        shupdown_grace_period=5,
+        stream_target=_stream_container_events_and_logs,
+        stream_args=(container_group_client, container_client.containers, resource_group_name, name, container_name))
+
+
+def _start_streaming(terminate_condition, terminate_condition_args, shupdown_grace_period, stream_target, stream_args):
+    """Start streaming for the stream target. """
+    import colorama
+    import threading
+    import time
+    colorama.init()
+
+    try:
+        t = threading.Thread(target=stream_target, args=stream_args)
+        t.daemon = True
+        t.start()
+
+        while not terminate_condition(*terminate_condition_args) and t.is_alive():
+            time.sleep(10)
+
+        time.sleep(shupdown_grace_period)
+
+    finally:
+        colorama.deinit()
+
+
+def _stream_logs(client, resource_group_name, name, container_name, restart_policy):
+    """Stream logs for a container. """
+    import time
+    lastOutputLines = 0
+    while True:
+        log = client.list_logs(resource_group_name, name, container_name)
+        lines = log.content.split('\n')
+        currentOutputLines = len(lines)
+
+        # Should only happen when the container restarts.
+        if currentOutputLines < lastOutputLines and restart_policy != 'Never':
+            print("Warning: you're having '--restart-policy={}'; the container '{}' was just restarted; the tail of the current log might be missing. Exiting...".format(restart_policy, container_name))
+            break
+
+        _move_console_cursor_up(lastOutputLines)
+        print(log.content)
+
+        lastOutputLines = currentOutputLines
+        time.sleep(2)
+
+
+def _stream_container_events_and_logs(container_group_client, container_client, resource_group_name, name, container_name):
+    """Stream container events and logs. """
+    import time
+    lastOutputLines = 0
+    lastContainerState = None
+
+    while True:
+        container_group, container = _find_container(container_group_client, resource_group_name, name, container_name)
+
+        container_state = 'Unknown'
+        if container.instance_view and container.instance_view.current_state and container.instance_view.current_state.state:
+            container_state = container.instance_view.current_state.state
+
+        _move_console_cursor_up(lastOutputLines)
+        if container_state != lastContainerState:
+            print("Container '{}' is in state '{}'...".format(container_name, container_state))
+
+        currentOutputLines = 0
+        if container.instance_view and container.instance_view.events:
+            for event in sorted(container.instance_view.events, key=lambda e: e.last_timestamp):
+                print('(count: {}) (last timestamp: {}) {}'.format(event.count, event.last_timestamp, event.message))
+                currentOutputLines += 1
+
+        lastOutputLines = currentOutputLines
+        lastContainerState = container_state
+
+        if container_state == 'Running':
+            print('\nStart streaming logs:')
+            break
+
+        time.sleep(2)
+
+    _stream_logs(container_client, resource_group_name, name, container_name, container_group.restart_policy)
+
+
+def _is_container_terminated(client, resource_group_name, name, container_name):
+    """Check if a container should be considered terminated. """
+    container_group, container = _find_container(client, resource_group_name, name, container_name)
+
+    # If a container group is terminated, assume the container is also terminated.
+    if container_group.instance_view and container_group.instance_view.state:
+        if container_group.instance_view.state == 'Succeeded' or container_group.instance_view.state == 'Failed':
+            return True
+
+    # If the restart policy is Always, assume the container will be restarted.
+    if container_group.restart_policy:
+        if container_group.restart_policy == 'Always':
+            return False
+
+    # Only assume the container is terminated if its state is Terminated.
+    if container.instance_view and container.instance_view.current_state and container.instance_view.current_state.state == 'Terminated':
+        return True
+
+    return False
+
+
+def _find_container(client, resource_group_name, name, container_name):
+    """Find a container in a container group. """
+    container_group = client.get(resource_group_name, name)
+    containers = [c for c in container_group.containers if c.name == container_name]
+
+    if len(containers) != 1:
+        raise CLIError("Found 0 or more than 1 container with name '{}'".format(container_name))
+
+    return container_group, containers[0]
+
+
+def _move_console_cursor_up(lines):
+    """Move console cursor up. """
+    import sys
+    if lines > 0:
+        # Use stdout.write to support Python 2
+        sys.stdout.write('\033[{}A\033[K\033[J'.format(lines))
+
+
 def create_container_instance(cmd, client, location, resource_group_name, name, image, storage_account_key,
                               storage_account_name, file_share_name, dns_name_label, environment_variables,
-                              is_dotnet=True, extra_ports=[]):
+                              extra_ports, command, mount_path):
     import shlex
 
     from azure.mgmt.containerinstance.models import (AzureFileVolume, Container, ContainerGroup,
                                                      ContainerGroupNetworkProtocol, ContainerPort, IpAddress, Port,
                                                      ResourceRequests, ResourceRequirements, Volume, VolumeMount,
-                                                     ContainerGroupIpAddressType, EnvironmentVariable)
+                                                     ContainerGroupIpAddressType)
 
     ports = [80, 443]
     ports += extra_ports
@@ -2687,13 +2848,7 @@ def create_container_instance(cmd, client, location, resource_group_name, name, 
 
     container_resource_requests = ResourceRequests(memory_in_gb=1.5, cpu=1)
     container_resource_requirements = ResourceRequirements(requests=container_resource_requests)
-
-    mount_path = '/mnt/web'
-
-    if is_dotnet:
-        command = shlex.split('dotnet watch -p {0} run -p {0}'.format(mount_path))
-    else:
-        command = shlex.split('flask run --host=0.0.0.0')
+    command = shlex.split(command)
 
     azure_file_volume = AzureFileVolume(share_name=file_share_name,
                                         storage_account_name=storage_account_name,
@@ -2724,16 +2879,13 @@ def create_container_instance(cmd, client, location, resource_group_name, name, 
     return LongRunningOperation(cmd.cli_ctx)(poller)
 
 
-def glob_files_locally(folder_path):
+def glob_files_locally(folder_path, banned):
     """glob files in local folder based on the given pattern"""
 
     len_folder_path = len(folder_path) + 1
-    
     for root, _, files in os.walk(folder_path):
         for f in files:
             full_path = os.path.join(root, f)
-            banned = ['/bin/', '/obj/', '\\bin\\', '\\obj\\', 'launchSettings.json', '__pycache__', '\\env\\', '/env/']
-
             if not [x for x in banned if x in full_path]:  # TODO: make it accurate
                 yield (full_path, full_path[len_folder_path:])
 
@@ -2806,7 +2958,6 @@ def _make_directory_in_files_share(file_service, file_share, directory_path, exi
         try:
             file_service.create_directory(share_name=file_share, directory_name=dir_name, fail_on_exist=False)
         except AzureHttpError:
-            from knack.util import CLIError
             raise CLIError('Failed to create directory {}'.format(dir_name))
 
         if existing_dirs:
@@ -2815,7 +2966,7 @@ def _make_directory_in_files_share(file_service, file_share, directory_path, exi
 
 def upload_to_file_share(cmd, rg, storage_account_name, destination, source, storage_account_key, destination_path=None,
                          validate_content=False, content_settings=None, max_connections=1, metadata=None,
-                         progress_callback=None, client=None):
+                         progress_callback=None, client=None, foldersToSkip=[]):
     """ Upload local files to Azure Storage File Share in batch """
     from azure.cli.core.profiles import get_sdk
     if client is None:
@@ -2824,7 +2975,7 @@ def upload_to_file_share(cmd, rg, storage_account_name, destination, source, sto
                                          storage_account_key, None, None, socket_timeout=None,
                                          endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
 
-    source_files = [c for c in glob_files_locally(source)]
+    source_files = [c for c in glob_files_locally(source, foldersToSkip)]
     settings_class = cmd.get_models('file.models#ContentSettings', resource_type=ResourceType.DATA_STORAGE)
     content_settings = settings_class()
     def _upload_action(src, dst):

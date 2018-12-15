@@ -361,4 +361,4 @@ def load_command_table(self, _):
         g.wait_command('wait')
 
     with self.command_group('', compute_gallery_image_versions_sdk, operation_group='gallery_image_versions', min_api='2018-06-01') as g:
-        g.custom_command('now', 'now')
+        g.custom_command('up', 'up')
