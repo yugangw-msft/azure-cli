@@ -1516,3 +1516,12 @@ helps['sig image-version wait'] = """
           text: |
             az sig image-version wait --updated -g MyResourceGroup --gallery-name MyGallery --gallery-image-definition MyImage --gallery-image-version 1.0.0
 """
+
+helps['up'] = """
+    type: command
+    short-summary: get your web under the current directory to run in cloud
+"""
+helps['down'] = """
+    type: command
+    short-summary: remove all infrastructures created by the "up" command
+"""

@@ -2567,31 +2567,61 @@ def update_image_version(instance, target_regions=None):
 # endregion
 
 # region of now
-
-def up(cmd, launch_browser=None, attach_log=None):
+def _get_infra_names():
     from azure.cli.core._profile import Profile  # todo perf
-    from azure.cli.core.profiles import get_sdk
     user = Profile().get_current_account_user()
     user = user.split('@', 1)[0]
     # logger.warning('looking for .csproj')
     cwd = os.environ.get('NOW_TEST_DIR') or os.getcwd()
+    from os.path import basename
+    prj = basename(cwd)
+    base_name = user + '-' + prj.rsplit('.', 1)[0]
+    return cwd, base_name, base_name, 'westus'
+
+
+def down(cmd):
+    _, _, resource_group_name, _ = _get_infra_names() 
+    resource_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
+    if resource_client.resource_groups.check_existence(resource_group_name):
+        logger.warning('Removing %s', resource_group_name)
+        return resource_client.resource_groups.delete(resource_group_name)
+    else:
+        logger.warning('Nothing to clean up')
+
+
+def up(cmd, launch_browser=None, attach=None):
+    from azure.cli.core.profiles import get_sdk
+    
+    cwd, base_name, resource_group_name, location = _get_infra_names()
+
     items = os.listdir(cwd)
     mount_path = '/mnt/web'
     if next((f for f in items if f.endswith('.csproj') or f.endswith('.vbproj')), None):
         config = {
             'image': 'microsoft/dotnet',
             'cmd': 'dotnet watch -p {0} run -p {0}'.format(mount_path),
-            'foldersToSkip': ['/bin/', '/obj/', '\\bin\\', '\\obj\\', 'launchSettings.json', '.git`']
+            'foldersToSkip': ['/bin/', '/obj/', '\\bin\\', '\\obj\\', 'launchSettings.json', '.git', '.vscode']
         }
     else:
         if next((f for f in items if f.endswith('package.json') or f.endswith('node_modules'))):
+            with open(os.path.join(cwd, 'package.json'), 'r') as package_file:
+                npm_deps = json.loads(package_file.read()).get('dependencies', {})
+            npm_cmds = []
+            if npm_deps:
+                prefix = '/app'
+                npm_cmds = ['npm --prefix {} -g install {}@{}'.format(prefix, k, v) for k, v in npm_deps.items()]
+                npm_cmds.insert(0, 'mkdir ' + prefix)
+            
+            npm_cmds.append('npm --prefix {0} start {0}'.format(mount_path))
             config = {
                 'image': 'node',
                 'ports': [3000],
-                # 'cmd': 'sh -c "npm --prefix {0} install --no-bin-links --no-audit {0} & npm --prefix {0} start {0}"'.format(mount_path),
-                'cmd': 'sh -c "npm --prefix {0} start {0}"'.format(mount_path),
-                'foldersToSkip': ['.git'] # 'node_modules'
+                #'cmd': 'sh -c "npm --prefix {0} install --no-bin-links --no-audit {0} & npm --prefix {0} start {0}"'.format(mount_path),
+                'cmd': 'sh -c "{}"'.format(' && '.join(npm_cmds)),
+                'foldersToSkip': ['.git', 'node_modules', '.vscode']
             }
+            if npm_deps:
+                config['env_vars'] = [{'name': 'NODE_PATH', 'value': '{}/lib/node_modules'.format(prefix)}]
             #raise CLIError(config['cmd'])
         else:
             if next((f for f in items if f.endswith('.py')), None):
@@ -2601,18 +2631,14 @@ def up(cmd, launch_browser=None, attach_log=None):
                         {'name': 'FLASK_DEBUG', 'value': '1'},
                         {'name': 'FLASK_APP', 'value': '{}/app.py'.format(mount_path)}  # TODO, find the righ start file.
                     ],
-                    'ports': [5000], # need to figure out the right port,
+                    'ports': [5000], # need to figure out the right port
                     'cmd': 'flask run --host=0.0.0.0',
-                    'foldersToSkip': ['__pycache__', '\\env\\', '/env/']
+                    'foldersToSkip': ['__pycache__', '\\env\\', '/env/', '.vscode']  # this is not right
                 }
             else:
                 raise CLIError("Can't find right code projects for Python, .NET, or NodeJS")
 
     # get project file under folder
-    from os.path import basename
-    prj = basename(cwd)
-    base_name = user + '-' + prj.rsplit('.', 1)[0]
-    resource_group_name, location = base_name, 'eastus2'
     resource_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
 
     # check RG exits and use it as a sign for the readiness
@@ -2622,10 +2648,13 @@ def up(cmd, launch_browser=None, attach_log=None):
     storage_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_STORAGE)
     storage_account_name, file_share_name = normalize_storage_name(base_name + 'stor'), mount_path.split('/')[-1]
 
+    t_file_svc = get_sdk(cmd.cli_ctx, ResourceType.DATA_STORAGE, 'file#FileService')
+
     from azure.mgmt.containerinstance import ContainerInstanceManagementClient
     container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
     container_name = (base_name + '-container').lower()[:63]
     if resource_ready:
+        logger.warning('Found the resource group of "{}". We assume infrastructure is ready'.format(resource_group_name))
         try:
             storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
         except Exception:
@@ -2635,10 +2664,13 @@ def up(cmd, launch_browser=None, attach_log=None):
                 storage_account_name))
         # upload the file share
         logger.warning('Uploading source files under "%s" to storage file share', cwd)
+        file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
+                                                  storage_account_key, None, None, socket_timeout=None,
+                                                  endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
         upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd,
-                             storage_account_key, config['foldersToSkip'])
+                             storage_account_key, client=file_svc_client, foldersToSkip=config['foldersToSkip'])
 
-        container_group = container_client.container_groups.get(resource_group_name, container_name)  # to verify
+        container_group = container_client.container_groups.get(resource_group_name, container_name)
     else:
         # create RG
         logger.warning('One time configuration...')
@@ -2659,7 +2691,6 @@ def up(cmd, launch_browser=None, attach_log=None):
 
         storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
 
-        t_file_svc = get_sdk(cmd.cli_ctx, ResourceType.DATA_STORAGE, 'file#FileService')
         file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
                                                   storage_account_key, None, None, socket_timeout=None,
                                                   endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
@@ -2676,22 +2707,22 @@ def up(cmd, launch_browser=None, attach_log=None):
         container_group = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
                                                     config.get('image'), storage_account_key, storage_account_name,
                                                     file_share_name, base_name, config.get('env_vars'), config.get('ports'),
-                                                    config.get('cmd'), mount_path)  # TODO, make it simple
+                                                    config.get('cmd'), mount_path) # TODO, make it simple
         container = container_group.containers[0]
-        if container.instance_view.current_state.detail_status == 'Error':
+        if container.instance_view.current_state.state == 'Error':
             log = container_client.container.list_logs(resource_group_name, container_name, container_name)
             raise CLIError(log.content)
     
     fqdn = container_group.ip_address.fqdn
-    site_url = 'http://{}{}'.format(fqdn, '/' + config['ports'][0] if config.get('ports') else '')
-    logger.warning('Site is ready: %s', site_url)
+    site_url = 'http://{}{}'.format(fqdn, ':{}'.format(config['ports'][0]) if config.get('ports') else '')
+    logger.warning('Site is ready: %s. %s', site_url, 'Let us Launch it in browser...' if launch_browser else '')
 
     if launch_browser:
         from azure.cli.core.util import open_page_in_browser
         open_page_in_browser(site_url)
 
-    if attach_log:
-        attach_to_container(container_client, resource_group_name, container_name)
+    if attach:
+        attach_to_container(container_client, resource_group_name, container_name, container_name)
 
 
 def normalize_storage_name(storage_account_name):
@@ -2712,7 +2743,7 @@ def attach_to_container(container_client, resource_group_name, name, container_n
         terminate_condition_args=(container_group_client, resource_group_name, name, container_name),
         shupdown_grace_period=5,
         stream_target=_stream_container_events_and_logs,
-        stream_args=(container_group_client, container_client.containers, resource_group_name, name, container_name))
+        stream_args=(container_group_client, container_client.container, resource_group_name, name, container_name))
 
 
 def _start_streaming(terminate_condition, terminate_condition_args, shupdown_grace_period, stream_target, stream_args):
@@ -2992,7 +3023,7 @@ def upload_to_file_share(cmd, rg, storage_account_name, destination, source, sto
         if cmd.supported_api_version(min_api='2016-05-31'):
             create_file_args['validate_content'] = validate_content
 
-        # logger.warning('uploading %s', src)
+        #logger.warning('uploading %s', src)
         client.create_file_from_path(**create_file_args)
 
         return client.make_file_url(destination, dir_name, file_name)
