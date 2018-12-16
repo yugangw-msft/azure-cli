@@ -2614,7 +2614,7 @@ def up(cmd, launch_browser=None, attach=None):
             
             npm_cmds.append('npm --prefix {0} start {0}'.format(mount_path))
             config = {
-                'image': 'node',
+                'image': 'node:alpine',
                 'ports': [3000],
                 #'cmd': 'sh -c "npm --prefix {0} install --no-bin-links --no-audit {0} & npm --prefix {0} start {0}"'.format(mount_path),
                 'cmd': 'sh -c "{}"'.format(' && '.join(npm_cmds)),
@@ -2722,6 +2722,7 @@ def up(cmd, launch_browser=None, attach=None):
         open_page_in_browser(site_url)
 
     if attach:
+        logger.warning('Attaching to standard output and error streams...')
         attach_to_container(container_client, resource_group_name, container_name, container_name)
 
 
