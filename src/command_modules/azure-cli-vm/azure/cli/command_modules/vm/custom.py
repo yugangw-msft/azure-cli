@@ -2609,7 +2609,8 @@ def up(cmd, launch_browser=None, attach=None):
             npm_cmds = []
             if npm_deps:
                 prefix = '/app'
-                npm_cmds = ['npm --prefix {} -g install {}@{}'.format(prefix, k, v) for k, v in npm_deps.items()]
+                npm_modules = ' '.join(['{}@{}'.format(k, v) for k, v in npm_deps.items()]) 
+                npm_cmds = ['npm --prefix {} -g install {}'.format(prefix, npm_modules)]
                 npm_cmds.insert(0, 'mkdir ' + prefix)
             
             npm_cmds.append('npm --prefix {0} start {0}'.format(mount_path))
