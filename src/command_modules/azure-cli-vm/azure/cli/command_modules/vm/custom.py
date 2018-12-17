@@ -2608,10 +2608,10 @@ def up(cmd, launch_browser=None, attach=None):
                 npm_deps = json.loads(package_file.read()).get('dependencies', {})
             npm_cmds = []
             if npm_deps:
-                prefix = '/app'
+                prefix = '/'
                 npm_modules = ' '.join(['{}@{}'.format(k, v) for k, v in npm_deps.items()]) 
                 npm_cmds = ['npm --prefix {} -g install {}'.format(prefix, npm_modules)]
-                npm_cmds.insert(0, 'mkdir ' + prefix)
+                # npm_cmds.insert(0, 'mkdir ' + prefix)
             
             npm_cmds.append('npm --prefix {0} start {0}'.format(mount_path))
             config = {
@@ -2622,7 +2622,7 @@ def up(cmd, launch_browser=None, attach=None):
                 'foldersToSkip': ['.git', 'node_modules', '.vscode']
             }
             if npm_deps:
-                config['env_vars'] = [{'name': 'NODE_PATH', 'value': '{}/lib/node_modules'.format(prefix)}]
+                config['env_vars'] = [{'name': 'NODE_PATH', 'value': '/lib/node_modules'}]
             #raise CLIError(config['cmd'])
         else:
             if next((f for f in items if f.endswith('.py')), None):
@@ -2724,7 +2724,7 @@ def up(cmd, launch_browser=None, attach=None):
 
     if attach:
         logger.warning('Attaching to standard output and error streams...')
-        attach_to_container(container_client, resource_group_name, container_name, container_name)
+        attach_to_container(container_client, resource_group_name, container_name, container_name)      
 
 
 def normalize_storage_name(storage_account_name):
@@ -2906,7 +2906,8 @@ def create_container_instance(cmd, client, location, resource_group_name, name, 
                             containers=[container],
                             os_type='Linux',
                             ip_address=cgroup_ip_address,
-                            volumes=volumes)
+                            volumes=volumes,
+                            restart_policy='Always')
     client.config.long_running_operation_timeout = 10
     poller = client.container_groups.create_or_update(resource_group_name, name, cgroup)
     return LongRunningOperation(cmd.cli_ctx)(poller)
