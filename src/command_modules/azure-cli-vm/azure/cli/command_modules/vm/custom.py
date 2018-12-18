@@ -2576,7 +2576,7 @@ def _get_infra_names():
     from os.path import basename
     prj = basename(cwd)
     base_name = user + '-' + prj.rsplit('.', 1)[0]
-    return cwd, base_name, base_name, 'westus'
+    return cwd, base_name, base_name, 'eastus2'
 
 
 def down(cmd):
@@ -2590,6 +2590,7 @@ def down(cmd):
 
 
 def up(cmd, launch_browser=None, attach=None):
+    import time
     from azure.cli.core.profiles import get_sdk
     
     cwd, base_name, resource_group_name, location = _get_infra_names()
@@ -2623,7 +2624,6 @@ def up(cmd, launch_browser=None, attach=None):
             }
             if npm_deps:
                 config['env_vars'] = [{'name': 'NODE_PATH', 'value': '/lib/node_modules'}]
-            #raise CLIError(config['cmd'])
         else:
             if next((f for f in items if f.endswith('.py')), None):
                 config = {
@@ -2655,7 +2655,7 @@ def up(cmd, launch_browser=None, attach=None):
     container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
     container_name = (base_name + '-container').lower()[:63]
     if resource_ready:
-        logger.warning('Found the resource group of "{}". We assume infrastructure is ready'.format(resource_group_name))
+        logger.warning('Found the resource group of "%s". We assume infrastructure is ready', resource_group_name)
         try:
             storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
         except Exception:
@@ -2664,14 +2664,21 @@ def up(cmd, launch_browser=None, attach=None):
             raise CLIError("Can't find the storage account '{}' used to contain the web source code".format(
                 storage_account_name))
         # upload the file share
-        logger.warning('Uploading source files under "%s" to storage file share', cwd)
+        t = time.time()
         file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
                                                   storage_account_key, None, None, socket_timeout=None,
                                                   endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
+        logger.warning('Uploading source files under "%s" to storage file share', cwd)
         upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd,
                              storage_account_key, client=file_svc_client, foldersToSkip=config['foldersToSkip'])
-
+        logger.warning('Done(%s sec)', int(time.time()-t))
         container_group = container_client.container_groups.get(resource_group_name, container_name)
+        
+        t = time.time()
+        logger.warning('Restarting the container instance %s', container_name)
+        poller = container_client.container_groups.restart(resource_group_name, container_name)
+        LongRunningOperation(cmd.cli_ctx)(poller)
+        logger.warning('Done(%s sec)', int(time.time()-t))
     else:
         # create RG
         logger.warning('One time configuration...')
@@ -2679,36 +2686,39 @@ def up(cmd, launch_browser=None, attach=None):
 
         t_resource_group = get_sdk(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES,
                                    'models#ResourceGroup')
+        t = time.time()
         resource_client.resource_groups.create_or_update(resource_group_name,
                                                          t_resource_group(location=location))
+        logger.warning('    Done (%s sec)', int(time.time()-t))
         # create storage account
-        logger.warning('    Creating a storage account "%s"', storage_account_name)
-
+        t = time.time()
         StorageAccountCreateParameters, Sku, Kind = cmd.get_models('StorageAccountCreateParameters', 'Sku',
                                                                    'Kind', resource_type=ResourceType.MGMT_STORAGE)
         params = StorageAccountCreateParameters(sku=Sku(name='Standard_LRS'), kind=Kind('Storage'), location=location)
+        logger.warning('    Creating a storage account "%s"', storage_account_name)
         poller = storage_client.storage_accounts.create(resource_group_name, storage_account_name, params)
         LongRunningOperation(cmd.cli_ctx)(poller)
-
+        logger.warning('    Done (%s sec)', int(time.time()-t))
         storage_account_key = get_storage_account_key(cmd, storage_client, resource_group_name, storage_account_name)
 
         file_svc_client = get_data_service_client(cmd.cli_ctx, t_file_svc, storage_account_name,
                                                   storage_account_key, None, None, socket_timeout=None,
                                                   endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
-        logger.warning('    Creating storage file share "%s"', file_share_name)
         file_svc_client.create_share(file_share_name)
-
         # upload to the file share
+        t = time.time()
         logger.warning('Uploading source files under "%s" to storage file share', cwd)
         upload_to_file_share(cmd, resource_group_name, storage_account_name, file_share_name, cwd, storage_account_key,
                              client=file_svc_client, foldersToSkip=config['foldersToSkip'])
-
+        logger.warning('Done (%s sec)', int(time.time()-t))
         # create a container instance
-        logger.warning('Provisioning a container instance "%s" with image of "%s"', container_name, config.get('image'))
+        t = time.time()
+        logger.warning('Provisioned a container instance "%s" with image of "%s"', container_name, config.get('image'))
         container_group = create_container_instance(cmd, container_client, location, resource_group_name, container_name,
                                                     config.get('image'), storage_account_key, storage_account_name,
                                                     file_share_name, base_name, config.get('env_vars'), config.get('ports'),
                                                     config.get('cmd'), mount_path) # TODO, make it simple
+        logger.warning('Done (%s sec)', int(time.time()-t))
         container = container_group.containers[0]
         if container.instance_view.current_state.state == 'Error':
             log = container_client.container.list_logs(resource_group_name, container_name, container_name)
@@ -3000,7 +3010,7 @@ def _make_directory_in_files_share(file_service, file_share, directory_path, exi
 
 def upload_to_file_share(cmd, rg, storage_account_name, destination, source, storage_account_key, destination_path=None,
                          validate_content=False, content_settings=None, max_connections=1, metadata=None,
-                         progress_callback=None, client=None, foldersToSkip=[]):
+                         progress_callback=None, client=None, foldersToSkip=None):
     """ Upload local files to Azure Storage File Share in batch """
     from azure.cli.core.profiles import get_sdk
     if client is None:
@@ -3009,7 +3019,7 @@ def upload_to_file_share(cmd, rg, storage_account_name, destination, source, sto
                                          storage_account_key, None, None, socket_timeout=None,
                                          endpoint_suffix=cmd.cli_ctx.cloud.suffixes.storage_endpoint)
 
-    source_files = [c for c in glob_files_locally(source, foldersToSkip)]
+    source_files = [c for c in glob_files_locally(source, foldersToSkip or [])]
     settings_class = cmd.get_models('file.models#ContentSettings', resource_type=ResourceType.DATA_STORAGE)
     content_settings = settings_class()
     def _upload_action(src, dst):
