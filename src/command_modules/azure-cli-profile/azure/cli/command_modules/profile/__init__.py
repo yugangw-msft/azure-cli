@@ -24,6 +24,9 @@ class ProfileCommandsLoader(AzCommandsLoader):
         with self.command_group('', profile_custom) as g:
             g.command('login', 'login')
             g.command('logout', 'logout')
+            g.command('cd', 'set_local_context')
+            g.command('pwd', 'get_current_context')
+            g.command('ls', 'list_under_current_context')
             g.command('self-test', 'check_cli', deprecate_info=g.deprecate(hide=True))
 
         with self.command_group('account', profile_custom) as g:

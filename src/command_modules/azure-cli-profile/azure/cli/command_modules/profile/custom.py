@@ -165,6 +165,70 @@ def list_locations(cmd):
     return get_subscription_locations(cmd.cli_ctx)
 
 
+def set_local_context(cmd, local_context):
+    from azure.cli.core._config import DEFAULTS_SECTION
+    new_parts = local_context.split('/')
+    if local_context[0] == '/':
+        # TODO check the subscriptions, and or rg and resource. error if there are name dupes
+        if local_context.lower().endswith('/subscriptions/'):
+            if len(new_parts) > 6:
+                new_parts = new_parts[0:6]
+            new_value = '/' + '/'.join(new_parts)
+            cmd.cli_ctx.config.set_value(DEFAULTS_SECTION, 'local_context', new_value)
+            return new_value
+        elif len(new_parts) > 3:
+            new_parts = new_parts[0:3]
+    else:
+        existing_value = get_current_context(cmd)
+        exiting_parts = existing_value.split('/')
+        new_parts = [exiting_parts[i] for i in range(0, 6, 2) if i<len(exiting_parts)]
+        for p in new_parts:
+            if p == '.':
+                continue
+            elif p == '..':
+                if not new_parts:
+                    raise CLIError('invalid value')
+                new_parts.pop()
+            else:
+                new_parts.append(p)
+
+    if len(new_parts) > 3:
+        # TODO, figure out the right resource types
+        new_parts = zip(['subscriptions', 'resourceGroups', 'virtualMachines'], new_parts)
+        result = []
+        for a, b in new_parts:
+            result += [a, b]
+
+    new_value = '/' + '/'.join(result)
+    cmd.cli_ctx.config.set_value(DEFAULTS_SECTION, 'local_context', new_value)
+    return new_value
+
+
+def get_current_context(cmd):
+    from azure.cli.core._config import DEFAULTS_SECTION
+    pwd = cmd.cli_ctx.config.get(DEFAULTS_SECTION, 'local_context', None)
+    if not pwd:
+        subscription = show_subscription(cmd)
+        return "/subscriptions/" + subscription['id'] if subscription.get('id', None) else None
+
+
+def list_under_current_context(cmd):
+    # based on the segment number, and do different things
+    # if 2, then list all RG
+    # elif 4, then list all resources under the RG
+    # else list nothing
+    local_context = get_current_context()
+    if not local_context:
+        return None
+    parts = local_context.split('/')
+    if len(parts) == 2:
+        pass # return list_groups
+    elif len(parts) == 4:
+        pass # list_resource_under_groups
+    else:
+        return None
+
+
 def check_cli(cmd):
     from azure.cli.core.file_util import (
         create_invoker_and_load_cmds_and_args, get_all_help)
