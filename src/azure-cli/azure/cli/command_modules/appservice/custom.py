@@ -14,6 +14,7 @@ except ImportError:
     from urlparse import urlparse  # pylint: disable=import-error
 from binascii import hexlify
 from os import urandom
+import ast
 import datetime
 import json
 import ssl
@@ -38,17 +39,23 @@ from azure.mgmt.web.models import (Site, SiteConfig, User, AppServicePlan, SiteC
                                    RestoreRequest, FrequencyUnit, Certificate, HostNameSslState,
                                    RampUpRule, UnauthenticatedClientAction, ManagedServiceIdentity,
                                    DeletedAppRestoreRequest, DefaultErrorResponseException,
-                                   SnapshotRestoreRequest, SnapshotRecoverySource)
+                                   SnapshotRestoreRequest, SnapshotRecoverySource, HybridConnection,
+                                   SwiftVirtualNetwork)
+
 from azure.mgmt.applicationinsights import ApplicationInsightsManagementClient
 from azure.storage.blob import BlockBlobService, BlobPermissions
 
 from azure.cli.core.commands.client_factory import get_mgmt_service_client
+from azure.cli.core.commands.client_factory import get_subscription_id
+from azure.cli.command_modules.network._client_factory import network_client_factory
 from azure.cli.core.commands import LongRunningOperation
 from azure.cli.core.util import in_cloud_console, shell_safe_json_parse, open_page_in_browser, get_json_object, \
     ConfiguredDefaultSetter
 from azure.cli.core.commands.client_factory import UA_AGENT
 
-from .tunnel import TunnelServer
+from azure.mgmt.relay.models import AccessRights
+from azure.cli.command_modules.relay._client_factory import hycos_mgmt_client_factory, namespaces_mgmt_client_factory
+from azure.mgmt.network.models import Subnet, Delegation
 
 from .vsts_cd_provider import VstsContinuousDeliveryProvider
 from ._params import AUTH_TYPES, MULTI_CONTAINER_TYPES, LINUX_RUNTIMES, WINDOWS_RUNTIMES
@@ -61,14 +68,16 @@ from ._create_util import (zip_contents_from_dir, get_runtime_version_details, c
 from ._constants import (NODE_RUNTIME_NAME, OS_DEFAULT, STATIC_RUNTIME_NAME, PYTHON_RUNTIME_NAME,
                          RUNTIME_TO_IMAGE, NODE_VERSION_DEFAULT)
 
+from .tunnel import TunnelServer
+
+
 logger = get_logger(__name__)
 
 # pylint:disable=no-member,too-many-lines,too-many-locals
 
+
 # region "Common routines shared with quick-start extensions."
 # Please maintain compatibility in both interfaces and functionalities"
-
-
 def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_file=None,  # pylint: disable=too-many-statements
                   deployment_container_image_name=None, deployment_source_url=None, deployment_source_branch='master',
                   deployment_local_git=None, multicontainer_config_type=None, multicontainer_config_file=None,
@@ -127,7 +136,8 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
         if not match:
             raise CLIError("Runtime '{}' is not supported. Please invoke 'list-runtimes' to cross check".format(runtime))  # pylint: disable=line-too-long
         match['setter'](match, site_config)
-        # Be consistent with portal: any windows webapp should have this even it doesn't have node in the stack
+        # Be consistent with portal: any windows webapp should have this even
+        # it doesn't have node in the stack
         if not match['displayName'].startswith('node'):
             site_config.app_settings.append(NameValuePair(name="WEBSITE_NODE_DEFAULT_VERSION",
                                                           value=node_default_version))
@@ -142,7 +152,8 @@ def create_webapp(cmd, resource_group_name, name, plan, runtime=None, startup_fi
     poller = client.web_apps.create_or_update(resource_group_name, name, webapp_def)
     webapp = LongRunningOperation(cmd.cli_ctx)(poller)
 
-    # Ensure SCC operations follow right after the 'create', no precedent appsetting update commands
+    # Ensure SCC operations follow right after the 'create', no precedent
+    # appsetting update commands
     _set_remote_or_local_git(cmd, webapp, resource_group_name, name, deployment_source_url,
                              deployment_source_branch, deployment_local_git)
 
@@ -252,13 +263,11 @@ def update_azure_storage_account(cmd, resource_group_name, name, custom_id, stor
                        "Use 'az webapp config storage-account add' to add a new "
                        "Azure storage account configuration.".format(custom_id))
 
-    new_account_config = AzureStorageInfoValue(
-        type=storage_type or existing_account_config.type,
-        account_name=account_name or existing_account_config.account_name,
-        share_name=share_name or existing_account_config.share_name,
-        access_key=access_key or existing_account_config.access_key,
-        mount_path=mount_path or existing_account_config.mount_path
-    )
+    new_account_config = AzureStorageInfoValue(type=storage_type or existing_account_config.type,
+                                               account_name=account_name or existing_account_config.account_name,
+                                               share_name=share_name or existing_account_config.share_name,
+                                               access_key=access_key or existing_account_config.access_key,
+                                               mount_path=mount_path or existing_account_config.mount_path)
 
     azure_storage_accounts.properties[custom_id] = new_account_config
 
@@ -734,7 +743,8 @@ def _get_linux_multicontainer_encoded_config_from_file(file_name):
     return b64encode(config_file_bytes).decode('utf-8')
 
 
-# for any modifications to the non-optional parameters, adjust the reflection logic accordingly
+# for any modifications to the non-optional parameters, adjust the reflection
+# logic accordingly
 # in the method
 def update_site_configs(cmd, resource_group_name, name, slot=None,
                         linux_fx_version=None, windows_fx_version=None, reserved_instance_count=None, php_version=None,  # pylint: disable=unused-argument
@@ -862,7 +872,8 @@ def update_connection_strings(cmd, resource_group_name, name, connection_string_
     conn_strings = _generic_site_operation(cmd.cli_ctx, resource_group_name, name,
                                            'list_connection_strings', slot)
     for name_value in settings + slot_settings:
-        # split at the first '=', connection string should not have '=' in the name
+        # split at the first '=', connection string should not have '=' in the
+        # name
         conn_string_name, value = name_value.split('=', 1)
         if value[0] in ["'", '"']:  # strip away the quots used as separators
             value = value[1:-1]
@@ -917,8 +928,8 @@ def update_container_settings(cmd, resource_group_name, name, docker_registry_se
     if docker_registry_server_url is not None:
         settings.append('DOCKER_REGISTRY_SERVER_URL=' + docker_registry_server_url)
 
-    if (not docker_registry_server_user and not docker_registry_server_password and
-            docker_registry_server_url and '.azurecr.io' in docker_registry_server_url):
+    if (not docker_registry_server_user and not docker_registry_server_password and docker_registry_server_url and
+            '.azurecr.io' in docker_registry_server_url):
         logger.warning('No credential was provided to access Azure Container Registry. Trying to look up...')
         parsed = urlparse(docker_registry_server_url)
         registry_name = (parsed.netloc if parsed.scheme else parsed.path).split('.')[0]
@@ -1055,8 +1066,8 @@ def get_external_ip(cmd, resource_group_name, webapp_name):
     if not webapp:
         raise CLIError("'{}' app doesn't exist".format(webapp_name))
     if webapp.hosting_environment_profile:
-        address = client.app_service_environments.list_vips(
-            resource_group_name, webapp.hosting_environment_profile.name)
+        address = client.app_service_environments.list_vips(resource_group_name,
+                                                            webapp.hosting_environment_profile.name)
         if address.internal_ip_address:
             ip_address = address.internal_ip_address
         else:
@@ -1119,7 +1130,8 @@ def update_slot_configuration_from_source(cmd, client, resource_group_name, weba
     _generic_site_operation(cmd.cli_ctx, resource_group_name, webapp,
                             'update_configuration', slot, site_config)
 
-    # slot create doesn't clone over the app-settings and connection-strings, so we do it here
+    # slot create doesn't clone over the app-settings and connection-strings,
+    # so we do it here
     # also make sure slot settings don't get propagated.
 
     slot_cfg_names = client.web_apps.list_slot_configuration_names(resource_group_name, webapp)
@@ -1244,7 +1256,7 @@ def enable_local_git(cmd, resource_group_name, name, slot=None):
 def sync_site_repo(cmd, resource_group_name, name, slot=None):
     try:
         return _generic_site_operation(cmd.cli_ctx, resource_group_name, name, 'sync_repository', slot)
-    except CloudError as ex:  # Because of bad spec, sdk throws on 200. We capture it here
+    except CloudError as ex:  # Because of bad spec, sdk throws on 200.  We capture it here
         if ex.status_code not in [200, 204]:
             raise ex
 
@@ -1349,10 +1361,10 @@ def update_backup_schedule(cmd, resource_group_name, webapp_name, storage_accoun
         if not all([storage_account_url, frequency, retention_period_in_days,
                     keep_at_least_one_backup]):
             raise CLIError('No backup configuration found. A configuration must be created. ' +
-                           'Usage: --container-url URL --frequency TIME --retention DAYS ' +
-                           '--retain-one TRUE/FALSE')
+                           'Usage: --container-url URL --frequency TIME --retention DAYS ' + '--retain-one TRUE/FALSE')
 
-    # If arguments were not specified, use the values in the current backup schedule
+    # If arguments were not specified, use the values in the current backup
+    # schedule
     if storage_account_url is None:
         storage_account_url = configuration.storage_account_url
 
@@ -1414,7 +1426,6 @@ def list_snapshots(cmd, resource_group_name, name, slot=None):
 
 def restore_snapshot(cmd, resource_group_name, name, time, slot=None, restore_content_only=False,  # pylint: disable=redefined-outer-name
                      source_resource_group=None, source_name=None, source_slot=None):
-    from azure.cli.core.commands.client_factory import get_subscription_id
     client = web_client_factory(cmd.cli_ctx)
     recover_config = not restore_content_only
     if all([source_resource_group, source_name]):
@@ -1631,12 +1642,14 @@ def config_diagnostics(cmd, resource_group_name, name, level=None,
     http_logs = None
     server_logging_option = web_server_logging or docker_container_logging
     if server_logging_option:
-        # TODO: az blob storage log config currently not in use, will be impelemented later.
+        # TODO: az blob storage log config currently not in use, will be
+        # impelemented later.
         # Tracked as Issue: #4764 on Github
         filesystem_log_config = None
         turned_on = server_logging_option != 'off'
         if server_logging_option in ['filesystem', 'off']:
-            # 100 mb max log size, retention lasts 3 days. Yes we hard code it, portal does too
+            # 100 mb max log size, retention lasts 3 days.  Yes we hard code
+            # it, portal does too
             filesystem_log_config = FileSystemHttpLogsConfig(retention_in_mb=100, retention_in_days=3,
                                                              enabled=turned_on)
         http_logs = HttpLogsConfig(file_system=filesystem_log_config, azure_blob_storage=None)
@@ -1700,7 +1713,8 @@ def swap_slot(cmd, resource_group_name, webapp, slot, target_slot=None, action='
 
 def delete_slot(cmd, resource_group_name, webapp, slot):
     client = web_client_factory(cmd.cli_ctx)
-    # TODO: once swagger finalized, expose other parameters like: delete_all_slots, etc...
+    # TODO: once swagger finalized, expose other parameters like:
+    # delete_all_slots, etc...
     client.web_apps.delete_slot(resource_group_name, webapp, slot)
 
 
@@ -1800,15 +1814,13 @@ def _get_log(url, user_name, password, log_file=None):
 
     http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
     headers = urllib3.util.make_headers(basic_auth='{0}:{1}'.format(user_name, password))
-    r = http.request(
-        'GET',
-        url,
-        headers=headers,
-        preload_content=False
-    )
+    r = http.request('GET',
+                     url,
+                     headers=headers,
+                     preload_content=False)
     if r.status != 200:
-        raise CLIError("Failed to connect to '{}' with status code '{}' and reason '{}'".format(
-            url, r.status, r.reason))
+        raise CLIError("Failed to connect to '{}' with status code '{}' and reason '{}'".format(url,
+                                                                                                r.status, r.reason))
     if log_file:  # download logs
         with open(log_file, 'wb') as f:
             while True:
@@ -1820,7 +1832,8 @@ def _get_log(url, user_name, password, log_file=None):
         std_encoding = sys.stdout.encoding
         for chunk in r.stream():
             if chunk:
-                # Extra encode() and decode for stdout which does not surpport 'utf-8'
+                # Extra encode() and decode for stdout which does not surpport
+                # 'utf-8'
                 print(chunk.decode(encoding='utf-8', errors='replace')
                       .encode(std_encoding, errors='replace')
                       .decode(std_encoding, errors='replace'), end='')  # each line of log has CRLF.
@@ -1919,7 +1932,8 @@ def unbind_ssl_cert(cmd, resource_group_name, name, certificate_thumbprint, slot
 
 
 def _match_host_names_from_cert(hostnames_from_cert, hostnames_in_webapp):
-    # the goal is to match '*.foo.com' with host name like 'admin.foo.com', 'logs.foo.com', etc
+    # the goal is to match '*.foo.com' with host name like 'admin.foo.com',
+    # 'logs.foo.com', etc
     matched = set()
     for hostname in hostnames_from_cert:
         if hostname.startswith('*'):
@@ -2126,8 +2140,7 @@ def create_function(cmd, resource_group_name, name, storage_account, plan=None,
         functionapp_def.location = location
 
     if is_linux and not runtime and (consumption_plan_location or not deployment_container_image_name):
-        raise CLIError(
-            "usage error: --runtime RUNTIME required for linux functions apps without custom image.")
+        raise CLIError("usage error: --runtime RUNTIME required for linux functions apps without custom image.")
 
     if runtime:
         if is_linux and runtime not in LINUX_RUNTIMES:
@@ -2175,7 +2188,8 @@ def create_function(cmd, resource_group_name, name, storage_account, plan=None,
     if consumption_plan_location is None and not is_plan_elastic_premium(plan_info):
         site_config.always_on = True
 
-    # If plan is elastic premium or windows consumption, we need these app settings
+    # If plan is elastic premium or windows consumption, we need these app
+    # settings
     is_windows_consumption = consumption_plan_location is not None and not is_linux
     if is_plan_elastic_premium(plan_info) or is_windows_consumption:
         site_config.app_settings.append(NameValuePair(name='WEBSITE_CONTENTAZUREFILECONNECTIONSTRING',
@@ -2294,11 +2308,10 @@ def _validate_and_get_connection_string(cli_ctx, resource_group_name, storage_ac
         keys = [obj.key1, obj.key2]  # pylint: disable=no-member
 
     endpoint_suffix = cli_ctx.cloud.suffixes.storage_endpoint
-    connection_string = 'DefaultEndpointsProtocol={};EndpointSuffix={};AccountName={};AccountKey={}'.format(
-        "https",
-        endpoint_suffix,
-        storage_account,
-        keys[0])  # pylint: disable=no-member
+    connection_string = 'DefaultEndpointsProtocol={};EndpointSuffix={};AccountName={};AccountKey={}' \
+                        .format("https", endpoint_suffix,
+                                storage_account,
+                                keys[0])  # pylint: disable=no-member
 
     return connection_string
 
@@ -2390,6 +2403,343 @@ def remove_triggered_webjob(cmd, resource_group_name, name, webjob_name, slot=No
     return client.web_apps.delete_triggered_web_job(resource_group_name, name, webjob_name)
 
 
+def list_hc(cmd, name, resource_group, slot=None):
+    linux_webapp = show_webapp(cmd, resource_group, name, slot)
+    is_linux = linux_webapp.reserved
+    if is_linux:
+        return logger.warning("hybrid connections not supported on a linux app.")
+
+    client = web_client_factory(cmd.cli_ctx)
+    if slot is None:
+        listed_vals = client.web_apps.list_hybrid_connections(resource_group, name)
+    else:
+        listed_vals = client.web_apps.list_hybrid_connections_slot(resource_group, name, slot)
+
+    # reformats hybrid connection, to prune unnecessary fields
+    mod_list = []
+    for x in listed_vals.additional_properties["value"]:
+        properties = x["properties"]
+        resourceGroup = x["id"].split("/")
+        mod_hc = {
+            "id": x["id"],
+            "location": x["location"],
+            "name": x["name"],
+            "properties": {
+                "hostname": properties["hostname"],
+                "port": properties["port"],
+                "relayArmUri": properties["relayArmUri"],
+                "relayName": properties["relayName"],
+                "serviceBusNamespace": properties["serviceBusNamespace"],
+                "serviceBusSuffix": properties["serviceBusSuffix"]
+            },
+            "resourceGroup": resourceGroup[4],
+            "type": x["type"]
+        }
+        mod_list.append(mod_hc)
+    return mod_list
+
+
+def add_hc(cmd, name, resource_group, namespace, hybrid_connection, slot=None):
+    linux_webapp = show_webapp(cmd, resource_group, name, slot)
+    is_linux = linux_webapp.reserved
+    if is_linux:
+        return logger.warning("hybrid connections not supported on a linux app.")
+
+    web_client = web_client_factory(cmd.cli_ctx)
+    hy_co_client = hycos_mgmt_client_factory(cmd.cli_ctx, cmd.cli_ctx)
+    namespace_client = namespaces_mgmt_client_factory(cmd.cli_ctx, cmd.cli_ctx)
+
+    hy_co_id = ''
+    for n in namespace_client.list():
+        if n.name == namespace:
+            hy_co_id = n.id
+
+    i = 0
+    hy_co_resource_group = ''
+    hy_co_split = hy_co_id.split("/")
+    for z in hy_co_split:
+        if z == "resourceGroups":
+            hy_co_resource_group = hy_co_split[i + 1]
+        i = i + 1
+
+    # calling the relay API to get information about the hybrid connection
+    hy_co = hy_co_client.get(hy_co_resource_group, namespace, hybrid_connection)
+
+    # if the hybrid connection does not have a default sender authorization
+    # rule, create it
+    hy_co_rules = hy_co_client.list_authorization_rules(hy_co_resource_group, namespace, hybrid_connection)
+    has_default_sender_key = False
+    for r in hy_co_rules:
+        if r.name == "defaultSender":
+            for z in r.rights:
+                if z == z.send:
+                    has_default_sender_key = True
+
+    if not has_default_sender_key:
+        rights = [AccessRights.send]
+        hy_co_client.create_or_update_authorization_rule(hy_co_resource_group, namespace, hybrid_connection,
+                                                         "defaultSender", rights)
+
+    hy_co_keys = hy_co_client.list_keys(hy_co_resource_group, namespace, hybrid_connection, "defaultSender")
+    hy_co_info = hy_co.id
+    print(hy_co.user_metadata)
+    hy_co_metadata = ast.literal_eval(hy_co.user_metadata)
+    hy_co_hostname = ''
+    for x in hy_co_metadata:
+        if x["key"] == "endpoint":
+            hy_co_hostname = x["value"]
+
+    hostname_parts = hy_co_hostname.split(":")
+    hostname = hostname_parts[0]
+    port = hostname_parts[1]
+    id_parameters = hy_co_info.split("/")
+
+    # populate object with information from the hybrid connection, and set it
+    # on webapp
+
+    hc = HybridConnection(service_bus_namespace=id_parameters[8],
+                          relay_name=hybrid_connection,
+                          relay_arm_uri=hy_co_info,
+                          hostname=hostname,
+                          port=port,
+                          send_key_name="defaultSender",
+                          send_key_value=hy_co_keys.primary_key,
+                          service_bus_suffix=".servicebus.windows.net")
+    if slot is None:
+        return_hc = web_client.web_apps.create_or_update_hybrid_connection(resource_group, name, namespace,
+                                                                           hybrid_connection, hc)
+    else:
+        return_hc = web_client.web_apps.create_or_update_hybrid_connection_slot(resource_group, name, namespace,
+                                                                                hybrid_connection, hc, slot)
+
+    # reformats hybrid connection, to prune unnecessary fields
+    resourceGroup = return_hc.id.split("/")
+    mod_hc = {
+        "hostname": return_hc.hostname,
+        "id": return_hc.id,
+        "location": return_hc.additional_properties["location"],
+        "name": return_hc.name,
+        "port": return_hc.port,
+        "relayArmUri": return_hc.relay_arm_uri,
+        "resourceGroup": resourceGroup[4],
+        "serviceBusNamespace": return_hc.service_bus_namespace,
+        "serviceBusSuffix": return_hc.service_bus_suffix
+    }
+    return mod_hc
+
+
+# set the key the apps use to connect with the hybrid connection
+def set_hc_key(cmd, plan, resource_group, namespace, hybrid_connection, key_type):
+    web_client = web_client_factory(cmd.cli_ctx)
+
+    # extract the hybrid connection resource group
+    asp_hy_co = web_client.app_service_plans.get_hybrid_connection(resource_group, plan, namespace, hybrid_connection)
+    arm_uri = asp_hy_co.relay_arm_uri
+    split_uri = arm_uri.split("resourceGroups/")
+    resource_group_strings = split_uri[1].split('/')
+    relay_resource_group = resource_group_strings[0]
+
+    hy_co_client = hycos_mgmt_client_factory(cmd.cli_ctx, cmd.cli_ctx)
+    # calling the relay function to obtain information about the hc in question
+    hy_co = hy_co_client.get(relay_resource_group, namespace, hybrid_connection)
+
+    # if the hybrid connection does not have a default sender authorization
+    # rule, create it
+    hy_co_rules = hy_co_client.list_authorization_rules(relay_resource_group, namespace, hybrid_connection)
+    has_default_sender_key = False
+    for r in hy_co_rules:
+        if r.name == "defaultSender":
+            for z in r.rights:
+                if z == z.send:
+                    has_default_sender_key = True
+
+    if not has_default_sender_key:
+        rights = [AccessRights.send]
+        hy_co_client.create_or_update_authorization_rule(relay_resource_group, namespace, hybrid_connection,
+                                                         "defaultSender", rights)
+
+    hy_co_keys = hy_co_client.list_keys(relay_resource_group, namespace, hybrid_connection, "defaultSender")
+    hy_co_metadata = ast.literal_eval(hy_co.user_metadata)
+    hy_co_hostname = 0
+    for x in hy_co_metadata:
+        if x["key"] == "endpoint":
+            hy_co_hostname = x["value"]
+
+    hostname_parts = hy_co_hostname.split(":")
+    hostname = hostname_parts[0]
+    port = hostname_parts[1]
+
+    key = "empty"
+    if key_type.lower() == "primary":
+        key = hy_co_keys.primary_key
+    elif key_type.lower() == "secondary":
+        key = hy_co_keys.secondary_key
+    # enures input is correct
+    if key == "empty":
+        logger.warning("Key type is invalid - must be primary or secondary")
+        return
+
+    apps = web_client.app_service_plans.list_web_apps_by_hybrid_connection(resource_group, plan, namespace,
+                                                                           hybrid_connection)
+    # changes the key for every app that uses that hybrid connection
+    for x in apps:
+        app_info = ast.literal_eval(x)
+        app_name = app_info["name"]
+        app_id = app_info["id"]
+        id_split = app_id.split("/")
+        app_resource_group = id_split[4]
+        hc = HybridConnection(service_bus_namespace=namespace, relay_name=hybrid_connection,
+                              relay_arm_uri=arm_uri, hostname=hostname, port=port, send_key_name="defaultSender",
+                              send_key_value=key)
+        web_client.web_apps.update_hybrid_connection(app_resource_group, app_name, namespace,
+                                                     hybrid_connection, hc)
+
+    return web_client.app_service_plans.list_web_apps_by_hybrid_connection(resource_group, plan,
+                                                                           namespace, hybrid_connection)
+
+
+def appservice_list_vnet(cmd, resource_group, plan):
+    web_client = web_client_factory(cmd.cli_ctx)
+    return web_client.app_service_plans.list_vnets(resource_group, plan)
+
+
+def remove_hc(cmd, resource_group, name, namespace, hybrid_connection, slot=None):
+    linux_webapp = show_webapp(cmd, resource_group, name, slot)
+    is_linux = linux_webapp.reserved
+    if is_linux:
+        return logger.warning("hybrid connections not supported on a linux app.")
+
+    client = web_client_factory(cmd.cli_ctx)
+    if slot is None:
+        return_hc = client.web_apps.delete_hybrid_connection(resource_group, name, namespace, hybrid_connection)
+    else:
+        return_hc = client.web_apps.delete_hybrid_connection_slot(resource_group, name, namespace, hybrid_connection,
+                                                                  slot)
+    return return_hc
+
+
+def list_vnet_integration(cmd, name, resource_group, slot=None):
+    client = web_client_factory(cmd.cli_ctx)
+    if slot is None:
+        result = list(client.web_apps.list_vnet_connections(resource_group, name))
+    else:
+        result = list(client.web_apps.list_vnet_connections_slot(resource_group, name, slot))
+    mod_list = []
+
+    # reformats the vnet entry, removing unecessary information
+    for x in result:
+        # removes GUIDs from name and id
+        longName = x.name
+        if '_' in longName:
+            usIndex = longName.index('_')
+            shortName = longName[usIndex + 1:]
+        else:
+            shortName = longName
+        v_id = x.id
+        lastSlash = v_id.rindex('/')
+        shortId = v_id[:lastSlash] + '/' + shortName
+        # extracts desired fields
+        certThumbprint = x.cert_thumbprint
+        location = x.additional_properties["location"]
+        v_type = x.type
+        vnet_resource_id = x.vnet_resource_id
+        id_strings = v_id.split('/')
+        resourceGroup = id_strings[4]
+        routes = x.routes
+
+        vnet_mod = {"certThumbprint": certThumbprint,
+                    "id": shortId,
+                    "location": location,
+                    "name": shortName,
+                    "resourceGroup": resourceGroup,
+                    "routes": routes,
+                    "type": v_type,
+                    "vnetResourceId": vnet_resource_id}
+        mod_list.append(vnet_mod)
+
+    return mod_list
+
+
+def add_vnet_integration(cmd, name, resource_group, vnet, subnet, slot=None):
+    client = web_client_factory(cmd.cli_ctx)
+    vnet_client = network_client_factory(cmd.cli_ctx)
+
+    list_all_vnets = vnet_client.virtual_networks.list_all()
+
+    vnet_id = ''
+    for v in list_all_vnets:
+        if v.name == vnet:
+            vnet_id = v.id
+
+    # parsing the arm uri in order to extract vnet_name and vnet_resource_group
+    vnet_id_strings = vnet_id.split('/')
+
+    vnet_resource_group = ''
+    i = 0
+    for z in vnet_id_strings:
+        if z == "resourceGroups":
+            vnet_resource_group = vnet_id_strings[i + 1]
+        i = i + 1
+
+    if slot is None:
+        swift_connection_info = client.web_apps.get_swift_virtual_network_connection(resource_group, name)
+    else:
+        swift_connection_info = client.web_apps.get_swift_virtual_network_connection_slot(resource_group, name, slot)
+
+    # check to see if the connection would be supported
+    if swift_connection_info.swift_supported is not True:
+        return logger.warning("""Your app must be in an Azure App Service deployment that is
+              capable of scaling up to Premium v2\nLearn more:
+              https://go.microsoft.com/fwlink/?linkid=2060115&clcid=0x409""")
+
+    subnetObj = vnet_client.subnets.get(vnet_resource_group, vnet, subnet)
+    delegations = subnetObj.delegations
+    delegated = False
+    for d in delegations:
+        if d.service_name == "Microsoft.Web/serverFarms":
+            delegated = True
+
+    if not delegated:
+        vnet_client.subnets.create_or_update(vnet_resource_group, vnet, subnet,
+                                             subnet_parameters=Subnet(name="subnet",
+                                                                      address_prefix=subnetObj.address_prefix,
+                                                                      delegations=[Delegation(name="delegation",
+                                                                                              service_name="Microsoft" +
+                                                                                              ".Web/serverFarms")]))
+
+    id_subnet = vnet_client.subnets.get(vnet_resource_group, vnet, subnet)
+    subnet_resource_id = id_subnet.id
+    swiftVnet = SwiftVirtualNetwork(subnet_resource_id=subnet_resource_id,
+                                    swift_supported=True)
+
+    if slot is None:
+        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection(resource_group, name, swiftVnet)
+    else:
+        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection_slot(resource_group, name,
+                                                                                             swiftVnet, slot)
+    # reformats the vnet entry, removing unecessary information
+    id_strings = return_vnet.id.split('/')
+    resourceGroup = id_strings[4]
+    mod_vnet = {
+        "id": return_vnet.id,
+        "location": return_vnet.additional_properties["location"],
+        "name": return_vnet.name,
+        "resourceGroup": resourceGroup,
+        "subnetResourceId": return_vnet.subnet_resource_id
+    }
+
+    return mod_vnet
+
+
+def remove_vnet_integration(cmd, name, resource_group, slot=None):
+    client = web_client_factory(cmd.cli_ctx)
+    if slot is None:
+        return_vnet = client.web_apps.delete_swift_virtual_network(resource_group, name)
+    else:
+        return_vnet = client.web_apps.delete_swift_virtual_network_slot(resource_group, name, slot)
+    return return_vnet
+
+
 def get_history_triggered_webjob(cmd, resource_group_name, name, webjob_name, slot=None):
     client = web_client_factory(cmd.cli_ctx)
     if slot:
@@ -2402,7 +2752,8 @@ def webapp_up(cmd, name, resource_group_name=None, plan=None,  # pylint: disable
     import os
     from azure.cli.core._profile import Profile
     client = web_client_factory(cmd.cli_ctx)
-    # the code to deploy is expected to be the current directory the command is running from
+    # the code to deploy is expected to be the current directory the command is
+    # running from
     src_dir = os.getcwd()
     user = Profile().get_current_account_user()
     user = user.split('@', 1)[0]
@@ -2418,7 +2769,8 @@ def webapp_up(cmd, name, resource_group_name=None, plan=None,  # pylint: disable
 
     # determine the details for app to be created from src contents
     lang_details = get_lang_from_content(src_dir)
-    # we support E2E create and deploy for selected stacks, any other stack, set defaults for os & runtime
+    # we support E2E create and deploy for selected stacks, any other stack,
+    # set defaults for os & runtime
     # and skip deployment
     language = lang_details.get('language')
     if not language:
@@ -2435,8 +2787,8 @@ def webapp_up(cmd, name, resource_group_name=None, plan=None,  # pylint: disable
             logger.info("Found sku argument, skipping use default sku")
             sku = sku
         is_skip_build = language.lower() == STATIC_RUNTIME_NAME
-        os_val = "Linux" if language.lower() == NODE_RUNTIME_NAME \
-            or language.lower() == PYTHON_RUNTIME_NAME else OS_DEFAULT
+        os_val = "Linux" if language.lower() == NODE_RUNTIME_NAME or \
+            language.lower() == PYTHON_RUNTIME_NAME else OS_DEFAULT
         # detect the version
         data = get_runtime_version_details(lang_details.get('file_loc'), language)
         version_used_create = data.get('to_create')
@@ -2503,12 +2855,14 @@ def webapp_up(cmd, name, resource_group_name=None, plan=None,  # pylint: disable
         # and get FirstOrDefault
         selected_asp = next((a for a in data if isinstance(a.sku, SkuDescription) and
                              a.sku.tier.lower() == full_sku.lower() and
-                             (a.location.replace(" ", "").lower() == location.lower() or a.location == location)), None)
+                             (a.location.replace(" ", "").lower() == location.lower() or
+                              a.location == location)), None)
         if selected_asp is not None:
             asp = selected_asp.name
             _create_new_asp = False
         elif selected_asp is None and num_asps > 0:
-            # from the sorted data pick the last one & check if a new ASP needs to be created
+            # from the sorted data pick the last one & check if a new ASP needs
+            # to be created
             # based on SKU or not
             _plan_info = data_sorted[num_asps - 1]
             if plan is None:
@@ -2590,7 +2944,8 @@ def webapp_up(cmd, name, resource_group_name=None, plan=None,  # pylint: disable
 
         logger.warning("Preparing to deploy %s contents to app.", '' if is_skip_build else 'and build')
         enable_zip_deploy(cmd, rg_name, name, zip_file_path)
-        # Remove the file after deployment, handling exception if user removed the file manually
+        # Remove the file after deployment, handling exception if user removed
+        # the file manually
         try:
             os.remove(zip_file_path)
         except OSError:
@@ -2620,7 +2975,8 @@ def _ping_scm_site(cmd, resource_group, name):
 
     #  wake up kudu, by making an SCM call
     import requests
-    #  work around until the timeout limits issue for linux is investigated & fixed
+    #  work around until the timeout limits issue for linux is investigated &
+    #  fixed
     user_name, password = _get_site_credential(cmd.cli_ctx, resource_group, name)
     scm_url = _get_scm_url(cmd, resource_group, name)
     import urllib3
@@ -2672,7 +3028,7 @@ def create_tunnel(cmd, resource_group_name, name, port=None, slot=None, timeout=
         ssh_user_password = 'Docker!'
         logger.warning('SSH is available { username: %s, password: %s }', ssh_user_name, ssh_user_password)
 
-    logger.warning('Ctrl + C to close')
+        logger.warning('Ctrl + C to close')
 
     if timeout:
         time.sleep(int(timeout))
@@ -2693,6 +3049,7 @@ def create_tunnel_and_session(cmd, resource_group_name, name, port=None, slot=No
 
     s = threading.Thread(target=_start_ssh_session,
                          args=('localhost', tunnel_server.get_port(), ssh_user_name, ssh_user_password))
+
     s.daemon = True
     s.start()
 
@@ -2769,8 +3126,7 @@ def create_devops_pipeline(
         overwrite_yaml=None,
         allow_force_push=None,
         github_pat=None,
-        github_repository=None
-):
+        github_repository=None):
     from .azure_devops_build_interactive import AzureDevopsBuildInteractive
     azure_devops_build_interactive = AzureDevopsBuildInteractive(cmd, logger, functionapp_name,
                                                                  organization_name, project_name, repository_name,

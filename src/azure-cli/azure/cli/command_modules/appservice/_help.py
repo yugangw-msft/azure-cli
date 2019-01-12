@@ -1542,3 +1542,167 @@ helps['webapp create-remote-connection'] = """
     type: command
     short-summary: Creates a remote connection using a tcp tunnel to your web app
 """
+
+helps['functionapp hybrid-connection'] = """
+    type: group
+    short-summary: commands that list, add, or remove hybrid connections from a sepcific functionapp
+"""
+
+helps['functionapp hybrid-connection list'] = """
+    type: command
+    short-summary: lists all the hybrid connections set on the specified functionapp
+    examples:
+        - name: list the hybrid connections
+          text: >
+              az functionapp hybrid-connection list -g myResourceGroup -n MyWebapp -s [slotName]
+"""
+
+helps['functionapp hybrid-connection add'] = """
+    type: command
+    short-summary: adds an existing hybrid connection to the specified functionapp
+    examples:
+        - name: add a hybrid connection to the app
+          text: >
+            az functionapp hybrid-connection add -g myResourceGroup -n MyWebapp -s [slotName]
+            --namespace [hybridConnectionNamespaceName] --hybrid-connection [hybridConnectionName]
+"""
+
+helps['functionapp hybrid-connection remove'] = """
+    type: command
+    short-summary: disconnects the specified hybrid connection from the specified functionapp
+    examples:
+        - name: remove the hybrid connection from the functionapp
+          text: >
+            az functionapp hybrid-connection remove -g myResourceGroup -n MyWebapp -s [slotName]
+            --namespace [hybridConnectionNamespace] --hybrid-connection [hybridConnectionName]
+"""
+
+helps['webapp hybrid-connection'] = """
+    type: group
+    short-summary: commands that list, add, or remove hybrid connections from a sepcific app
+"""
+
+helps['webapp hybrid-connection list'] = """
+    type: command
+    short-summary: lists all the hybrid connections set on the specified app
+    examples:
+        - name: list the hybrid connections
+          text: >
+              az webapp hybrid-connection list -g myResourceGroup -n MyWebapp -s [slotName]
+"""
+
+helps['webapp hybrid-connection add'] = """
+    type: command
+    short-summary: adds an existing hybrid connection to the specified app
+    examples:
+        - name: add a hybrid connection to the app
+          text: >
+            az webapp hybrid-connection add -g myResourceGroup -n MyWebapp -s [slotName]
+            --namespace [hybridConnectionNamespaceName] --hybrid-connection [hybridConnectionName]
+"""
+
+helps['webapp hybrid-connection remove'] = """
+    type: command
+    short-summary: removes an existing hybrid connection from the specified app
+    examples:
+        - name: remove the hybrid connection from the app
+          text: >
+            az webapp hybrid-connection remove -g myResourceGroup -n MyWebapp -s [slotName]
+            --namespace [hybridConnectionNamespace] --hybrid-connection [hybridConnectionName]
+"""
+
+helps['appservice hybrid-connection'] = """
+    type: group
+    short-summary: commands that interact with hybrid connections on an app service level - existing command sets which key each app uses to connect to the hybric connection
+"""
+
+helps['appservice hybrid-connection set-key'] = """
+    type: command
+    short-summary: specifies which key all the apps using a hybrid connection should use when connecting to it
+    examples:
+        - name: set the key the apps should use
+          text: >
+            az appservice hybrid-connection set-key --plan [hybridConnectionAppServicePlan] -g [appServicePlanResourceGroup]
+            --namespace [hybridConnectionNamespace] --hybrid-connection [hybridConnectionName]
+            --key-type ["primary" | "secondary"]
+"""
+
+helps['appservice plan vnet-integration'] = """
+    type: group
+    short-summary: commands that operate on virtual network integrations in a specified app service plan
+"""
+
+helps['appservice plan vnet-integration list'] = """
+    type: command
+    short-summary: lists all the virtual networks in a specified app service plan
+    examples:
+        - name: list the virtual network integrations
+          text: >
+            az appservice plan vnet-integration list -g myResourceGroup --plan [MyAspName]
+"""
+
+helps['webapp vnet-integration'] = """
+    type: group
+    short-summary: commands that list, add and remove a vnet-integration from an app
+"""
+
+helps['webapp vnet-integration list'] = """
+    type: command
+    short-summary: lists all the virtual networks the specified app is connected to
+    examples:
+        - name: list the virtual network integrations
+          text: >
+            az webapp vnet-integration list -g myResourceGroup -n MyWebapp -s [slotName]
+"""
+
+helps['webapp vnet-integration add'] = """
+    type: command
+    short-summary: add an existing regional virtual network integration to the specified app
+    examples:
+        - name: add a regional virtual network integration to an app
+          text: >
+            az webapp vnet-integration add -g myResourceGroup -n MyWebapp -s [slotName]
+            --vnet [vnetName] --subnet [subnetName]
+"""
+
+helps['webapp vnet-integration remove'] = """
+    type: command
+    short-summary: removes the specified regional virtual network integration from the specified app
+    examples:
+        - name: remove a regional virtual network integration from a webapp
+          text: >
+            az webapp vnet-integration remove -g myResourceGroup -n MyWebapp -s [slotName]
+"""
+
+helps['functionapp vnet-integration'] = """
+    type: group
+    short-summary: commands that list, add and remove a vnet-integration from an functionapp
+"""
+
+helps['functionapp vnet-integration list'] = """
+    type: command
+    short-summary: lists all the virtual networks the specified functionapp is connected to
+    examples:
+        - name: list the virtual network integrations
+          text: >
+            az functionapp vnet-integration list -g myResourceGroup -n MyWebapp -s [slotName]
+"""
+
+helps['functionapp vnet-integration add'] = """
+    type: command
+    short-summary: add an existing regional virtual network integration to the specified functionapp
+    examples:
+        - name: add a regional virtual network integration virtual network to an functionapp
+          text: >
+            az functionapp vnet-integration add -g myResourceGroup -n MyWebapp -s [slotName]
+            --vnet [vnetName] --subnet [subnetName]
+"""
+
+helps['functionapp vnet-integration remove'] = """
+    type: command
+    short-summary: removes the specified regional virtual network integration from the specified functionapp
+    examples:
+        - name: remove a regional virtual network integration integration from a functionapp
+          text: >
+            az functionapp vnet-integration remove -g myResourceGroup -n MyWebapp -s [slotName]
+"""
