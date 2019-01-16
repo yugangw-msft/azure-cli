@@ -2583,13 +2583,13 @@ def down(cmd):
     container_client = get_mgmt_service_client(cmd.cli_ctx, ContainerInstanceManagementClient)
     container_name = (base_name + '-container').lower()[:63]
     try:
-        container_group = container_client.container_groups.get(resource_group_name, container_name)
+        container_client.container_groups.get(resource_group_name, container_name)
     except CloudError:
         logger.warning('Nothing to clean up')
         return
     logger.warning('Deleting %s', container_name)
     container_client.container_groups.delete(resource_group_name, container_name)
-    
+
 
 def up(cmd, launch_browser=None, attach=None, ports=None):
     import time
@@ -2655,13 +2655,12 @@ def up(cmd, launch_browser=None, attach=None, ports=None):
         resource_client = get_mgmt_service_client(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES)
         t_resource_group = get_sdk(cmd.cli_ctx, ResourceType.MGMT_RESOURCE_RESOURCES,
                                    'models#ResourceGroup')
-        t = time.time()
         resource_client.resource_groups.create_or_update(resource_group_name,
                                                          t_resource_group(location=location))
-        logger.warning('    Done (%s sec)', int(time.time()-t))
         # create a container instance
         t = time.time()
-        logger.warning('Provisioned a container instance "%s" with image of "%s"', container_name, image)
+        logger.warning('    Creating needed infrastructure to run you code')
+        logger.info('    Provisioned a container instance "%s" with image of "%s"', container_name, image)
         container_group = create_container_instance(cmd, container_client, location, resource_group_name,
                                                     container_name, image, base_name, ports)
         logger.warning('Done (%s sec)', int(time.time()-t))
@@ -2672,25 +2671,22 @@ def up(cmd, launch_browser=None, attach=None, ports=None):
 
     fqdn = container_group.ip_address.fqdn
     site_url = 'http://{}:{}'.format(fqdn, ports[0])  #  Get port?
-    logger.warning('Site uri: %s %s', site_url, 'Let us Launch it in browser...' if launch_browser else '')
-    if launch_browser:
-        from azure.cli.core.util import open_page_in_browser
-        open_page_in_browser(site_url)
 
-    result, _ = sync_code(cwd, container_group.ip_address.ip, attach=True)
+    result = sync_code(cwd, container_group.ip_address.ip,
+                       site_url, attach=attach, launch_browser=launch_browser)
     if not result:
-        import time
         logger.warning('connection error occurred, retry one more time')
         time.sleep(3)
-        result, output = sync_code(cwd, container_group.ip_address.ip, attach=True)
-        if not result:
-            raise CLIError(output)
+        result = sync_code(cwd, container_group.ip_address.ip,
+                           site_url, attach=attach, launch_browser=launch_browser)
+    if not result:
+        raise CLIError('Failed to provision the code in cloud. Please refer to command output for details ')
     #if attach:
     #    logger.warning('Attaching to standard output and error streams...')
     #    attach_to_container(container_client, resource_group_name, container_name, container_name)
 
 
-def sync_code(cwd, public_ip, attach):
+def sync_code(cwd, public_ip, launch_url, attach, launch_browser):
     from subprocess import Popen, PIPE
     import shlex
     root_folder = os.environ.get('ProgramFiles(x86)') or os.environ.get('ProgramW6432')
@@ -2698,7 +2694,7 @@ def sync_code(cwd, public_ip, attach):
     cmd = '"{}" deploy --host {} --port 50051'.format(sync_tool, public_ip)
 
     process = Popen(shlex.split(cmd), stdout=PIPE)
-    result = True 
+    result = True
     while True:
         output = process.stdout.readline().decode()
         if output:
@@ -2706,17 +2702,24 @@ def sync_code(cwd, public_ip, attach):
             if 'System.Net.Http.HttpRequestException' in output:
                 process.kill()
                 result = False
-                break            
+                break   
             print(output)
-            if not attach and 'File synchronization succeeded' in output:
-                process.kill()
-                break
+            if 'Now listening on:' in output or 'start /az-app' in output:  # netcore or nodejs
+                if launch_browser:
+                    from azure.cli.core.util import open_page_in_browser
+                    logger.warning('Site uri: %s. Let us Launch it in browser...', launch_url)
+                    open_page_in_browser(launch_url)
+                else:
+                    logger.warning('Site uri: %s.', launch_url)
+                if not attach:
+                    process.kill()
+                    break
 
-    return result, output
+    return result
 
     #(out, err) = process.communicate()
     #  TODO: 1. exit code from the npm or dotnet and verify we capture all provision errors
-    #        2. output the npm/dotnet logs 
+    #        2. output the npm/dotnet logs
     #        3. Corss check skip the right files
     #        4. Port
 
