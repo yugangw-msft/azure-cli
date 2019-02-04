@@ -7,7 +7,7 @@ from azure.cli.core import AzCommandsLoader
 from azure.cli.core.commands import CliCommandType
 
 import azure.cli.command_modules.configure._help  # pylint: disable=unused-import
-
+from azure.cli.core.commands.parameters import get_three_state_flag
 
 class ConfigureCommandsLoader(AzCommandsLoader):
 
@@ -27,6 +27,7 @@ class ConfigureCommandsLoader(AzCommandsLoader):
 
         with self.argument_context('configure') as c:
             c.argument('defaults', nargs='+', options_list=('--defaults', '-d'))
+            c.argument('list_defaults', arg_type=get_three_state_flag(), help='list all applicable defaults')
             c.ignore('_subscription')  # ignore the global subscription param
 
 

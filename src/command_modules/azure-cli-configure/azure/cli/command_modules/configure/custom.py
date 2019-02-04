@@ -127,15 +127,17 @@ def _handle_global_configuration(config):
         config.set_value('logging', 'enable_log_file', 'yes' if enable_file_logging else 'no')
 
 
-def handle_configure(cmd, defaults=None):
+def handle_configure(cmd, defaults=None, list_defaults=None):
+    from azure.cli.core._config import DEFAULTS_SECTION
     if defaults:
-        from azure.cli.core._config import DEFAULTS_SECTION
         for default in defaults:
             parts = default.split('=', 1)
             if len(parts) == 1:
                 raise CLIError('usage error: --defaults STRING=STRING STRING=STRING ...')
             cmd.cli_ctx.config.set_value(DEFAULTS_SECTION, parts[0], _normalize_config_value(parts[1]))
         return
+    if list_defaults:
+        return cmd.cli_ctx.config.items(DEFAULTS_SECTION)
 
     # if nothing supplied, we go interactively
     try:

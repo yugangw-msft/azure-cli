@@ -31,7 +31,7 @@ EVENT_FAILED_EXTENSION_LOAD = 'MainLoader.OnFailedExtensionLoad'
 class AzCli(CLI):
 
     def __init__(self, **kwargs):
-        super(AzCli, self).__init__(**kwargs)
+        super(AzCli, self).__init__(use_local_config=True, **kwargs)
 
         from azure.cli.core.commands.arm import (
             register_ids_argument, register_global_subscription_argument)
