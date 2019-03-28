@@ -2173,7 +2173,7 @@ def get_history_triggered_webjob(cmd, resource_group_name, name, webjob_name, sl
     return client.web_apps.list_triggered_web_job_history(resource_group_name, name, webjob_name)
 
 
-def create_deploy_webapp(cmd, name, location=None, sku=None, dryrun=False):  # pylint: disable=too-many-statements
+def webapp_up(cmd, name, location=None, sku=None, dryrun=False, logs=None, launch=None):  # pylint: disable=too-many-statements
     import os
     client = web_client_factory(cmd.cli_ctx)
     # the code to deploy is expected to be the current directory the command is running from
@@ -2323,6 +2323,14 @@ def create_deploy_webapp(cmd, name, location=None, sku=None, dryrun=False):  # p
         except OSError:
             pass
     create_json.update({'app_url': url})
+    
+    if launch:
+        open_page_in_browser(url)
+
+    if logs:
+        config_diagnostics(cmd, resource_group_name=rg_name, name=name, application_logging=True, web_server_logging=True)
+        get_streaming_log(cmd, rg_name, name)
+        return
     logger.warning("All done.")
     return create_json
 
