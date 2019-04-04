@@ -1212,6 +1212,7 @@ class WebappZipDeployScenarioTest(ScenarioTest):
 
 
 class WebappImplictIdentityTest(ScenarioTest):
+    @AllowLargeResponse(8192)
     @ResourceGroupPreparer()
     def test_webapp_assign_system_identity(self, resource_group):
         scope = '/subscriptions/{}/resourcegroups/{}'.format(self.get_subscription_id(), resource_group)
@@ -1225,7 +1226,10 @@ class WebappImplictIdentityTest(ScenarioTest):
             self.cmd('webapp identity show -g {} -n {}'.format(resource_group, webapp_name), checks=[
                 self.check('principalId', result['principalId'])
             ])
-
+        self.cmd('role assignment list -g {} --assignee {}'.format(resource_group, result['principalId']), checks=[
+            JMESPathCheck('length([])', 1),
+            JMESPathCheck('[0].roleDefinitionName', role)
+        ])
         self.cmd('webapp identity show -g {} -n {}'.format(resource_group, webapp_name), checks=self.check('principalId', result['principalId']))
         self.cmd('webapp identity remove -g {} -n {}'.format(resource_group, webapp_name))
         self.cmd('webapp identity show -g {} -n {}'.format(resource_group, webapp_name), checks=self.is_empty())
