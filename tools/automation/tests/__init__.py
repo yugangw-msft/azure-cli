@@ -189,6 +189,7 @@ def discover_tests(args):
   Discover Tests
 ==================
 """)
+    display('filter is:' + args.filter)
 
     module_data = {}
     for mod in all_modules:
@@ -196,7 +197,10 @@ def discover_tests(args):
         if args.filter:
             s, e = args.filter.split('-')
             if not s<=mod_name[0]<=e:
+                display('skipping the ' + mod_name)
                 continue
+            else:
+                display('will process ' + mod_name)
         if mod_name == 'core' or mod_name == 'telemetry':
             mod_data = {
                 'filepath': os.path.join(mod[0].path, mod_name, 'tests'),
