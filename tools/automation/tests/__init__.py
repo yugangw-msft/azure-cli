@@ -193,6 +193,10 @@ def discover_tests(args):
     module_data = {}
     for mod in all_modules:
         mod_name = mod[1]
+        if args.filter:
+            s, e = args.filter.split('-')
+            if not s<=mod_name[0]<=e:
+                continue
         if mod_name == 'core' or mod_name == 'telemetry':
             mod_data = {
                 'filepath': os.path.join(mod[0].path, mod_name, 'tests'),
@@ -296,6 +300,8 @@ def setup_arguments(parser):
                                                                                  'fully qualified paths when using --tests.')
     parser.add_argument('--profile', dest='profile', help='Run automation against a specific profile. If omit, the '
                                                           'tests will run against current profile.')
+    parser.add_argument('--filter', dest='filter',
+                        help='specify the test name range, e.g. "a-n", will run all test modules with the starting character from "a" to "n"')
     parser.set_defaults(func=execute)
 
     return parser

@@ -56,4 +56,4 @@ az -v
 az -h
 
 title 'Running tests'
-python -m automation test --ci --profile $target_profile
+python -m automation test --ci --profile $target_profile --filter a-b
