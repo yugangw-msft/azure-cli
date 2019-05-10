@@ -77,7 +77,10 @@ def execute(args):
                 continue
         selected_modules = filter_user_selected_modules_with_tests(selected_modules, args.profile)
         args.tests = test_paths
-
+    display('selected modules: {}'.format(','.join(selected_modules)))
+    if args.filter:
+        s, e = args.filter.split('-')
+        selected_modules = [m for m in selected_modules if s<=m[0]<=e]
     success, failed_tests = run_tests(selected_modules, parallel=args.parallel, run_live=args.live, tests=args.tests)
     # if args.dest_file:
     #     with open(args.dest_file, 'w') as f:
