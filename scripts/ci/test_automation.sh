@@ -27,6 +27,8 @@ title 'Install private packages (optional)'
 [ -d privates ] && pip install -qqq privates/*.whl
 
 title 'Install products'
+echo ALL_MODULES: $ALL_MODULES 
+echo share_folder: $share_folder
 pip install -qqq $ALL_MODULES
 
 title 'Installed packages'
