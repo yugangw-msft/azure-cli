@@ -40,8 +40,12 @@ def execute(args):
     if args.ci:
         # CI Mode runs specific modules
         output('Running in CI Mode')
-        selected_modules = [('All modules', 'azure.cli', 'azure.cli'),
-                            ('CLI Linter', 'automation.cli_linter', 'automation.cli_linter')]
+        if args.filter:
+            seleced
+        else:
+            selected_modules = [('All modules', 'azure.cli', 'azure.cli'),
+                                ('CLI Linter', 'automation.cli_linter', 'automation.cli_linter')]
+
     elif not (args.tests or args.src_file):
         # Default is to run with modules (possibly via environment variable)
         if os.environ.get('AZURE_CLI_TEST_MODULES', None):
@@ -196,6 +200,7 @@ def discover_tests(args):
 
     module_data = {}
     for mod in all_modules:
+        display('module info: ' + str(mod))
         mod_name = mod[1]
         if args.filter:
             s, e = args.filter.split('-')
