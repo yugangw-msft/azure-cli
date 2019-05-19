@@ -237,9 +237,13 @@ class Profile(object):
                               user_assigned_identity_id=None):
         consolidated = []
         for s in subscriptions:
+            display_name = s.display_name
+            if sys.version[0] == '2':  # get rid of unicode
+                display_name = re.sub(r'[^\x00-\x7f]', lambda x:'X', display_name)
+
             consolidated.append({
                 _SUBSCRIPTION_ID: s.id.rpartition('/')[2],
-                _SUBSCRIPTION_NAME: s.display_name,
+                _SUBSCRIPTION_NAME: display_name,
                 _STATE: s.state.value,
                 _USER_ENTITY: {
                     _USER_NAME: user,
@@ -249,11 +253,13 @@ class Profile(object):
                 _TENANT_ID: s.tenant_id,
                 _ENVIRONMENT_NAME: self.cli_ctx.cloud.name
             })
+
             if cert_sn_issuer_auth:
                 consolidated[-1][_USER_ENTITY][_SERVICE_PRINCIPAL_CERT_SN_ISSUER_AUTH] = True
             if user_assigned_identity_id:
                 consolidated[-1][_USER_ENTITY][_ASSIGNED_IDENTITY_INFO] = user_assigned_identity_id
         return consolidated
+
 
     def _build_tenant_level_accounts(self, tenants):
         result = []
