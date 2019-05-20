@@ -241,8 +241,8 @@ class Profile(object):
             display_name = s.display_name
             try:
                 s.display_name.encode(sys.getdefaultencoding())
-            except UnicodeEncodeError:  # mainly for Python 2.7 with ascii as the default encoding
-                display_name = s.display_name.encode('ascii', 'replace').decode('ascii')
+            except (UnicodeEncodeError, UnicodeDecodeError):  # mainly for Python 2.7 with ascii as the default encoding
+                display_name = re.sub(r'[^\x00-\x7f]', lambda x:'?', display_name)
 
             consolidated.append({
                 _SUBSCRIPTION_ID: s.id.rpartition('/')[2],

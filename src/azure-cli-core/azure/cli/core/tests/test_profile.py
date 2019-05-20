@@ -110,8 +110,8 @@ class TestProfile(unittest.TestCase):
     def test_normalize_with_unicode_in_subscription_name(self):
         cli = DummyCli()
         storage_mock = {'subscriptions': None}
-        test_display_name = 'sub\x80'
-        polished_display_name = 'subX'
+        test_display_name = 'sub' + chr(255)
+        polished_display_name = 'sub?'
         test_subscription = SubscriptionStub('sub1',
                                              test_display_name,
                                              SubscriptionState.enabled,
