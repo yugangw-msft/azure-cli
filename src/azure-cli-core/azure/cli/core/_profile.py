@@ -263,7 +263,6 @@ class Profile(object):
                 consolidated[-1][_USER_ENTITY][_ASSIGNED_IDENTITY_INFO] = user_assigned_identity_id
         return consolidated
 
-
     def _build_tenant_level_accounts(self, tenants):
         result = []
         for t in tenants:
