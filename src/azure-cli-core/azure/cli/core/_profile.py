@@ -235,11 +235,14 @@ class Profile(object):
 
     def _normalize_properties(self, user, subscriptions, is_service_principal, cert_sn_issuer_auth=None,
                               user_assigned_identity_id=None):
+        import sys
         consolidated = []
         for s in subscriptions:
             display_name = s.display_name
-            if sys.version[0] == '2':  # get rid of unicode
-                display_name = re.sub(r'[^\x00-\x7f]', lambda x:'X', display_name)
+            try:
+                s.display_name.encode(sys.getdefaultencoding())
+            except UnicodeEncodeError:  # mainly for Python 2.7 with ascii as the default encoding
+                display_name = s.display_name.encode('ascii', 'replace').decode('ascii')
 
             consolidated.append({
                 _SUBSCRIPTION_ID: s.id.rpartition('/')[2],
