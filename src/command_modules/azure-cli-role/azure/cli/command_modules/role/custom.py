@@ -872,7 +872,6 @@ def admin_consent(cmd, identifier):
     access_token = profile.get_raw_token('74658136-14ec-4630-ad9b-26e160ff0fc6')
     headers = {
         'Authorization': "Bearer " + access_token[0][1],
-        'Accept-Encoding': 'gzip, deflate, br',
         'x-ms-client-request-id': str(uuid.uuid4()),
         'User-Agent': UA_AGENT
     }

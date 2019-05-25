@@ -281,3 +281,6 @@ def load_arguments(self, _):
         c.ignore('_subscription')  # TODO: ensure this does work 
         c.argument('method', arg_type=get_enum_type(['head', 'get', 'put', 'post', 'delete', 'options'], default='get'),
                    help='HTTP request method')
+        c.argument('headers', nargs='+')
+        c.argument('query_strings', nargs='+')
+        c.argument('skip_auth', action='store_true')

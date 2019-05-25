@@ -1771,11 +1771,12 @@ def list_resource_links(cmd, scope=None, filter_string=None):
 
 
 def invoke_request(cmd, method, url,
-                   headers=None, query_strings=None, pay_load=None, skip_auth=False, resource_url=None):
+                   headers=None, query_strings=None, pay_load=None, skip_auth=False, resource_url=None, output_file=None):
     import six
 
     import requests
     from azure.cli.core.util import should_disable_connection_verify
+    from azure.cli.core.commands.client_factory import UA_AGENT
 
     methods = {
         'head': requests.head,
@@ -1787,8 +1788,16 @@ def invoke_request(cmd, method, url,
     }
     method = methods.get(method)
 
-    query_strings = {x.split('=', 1) for x in query_strings} if query_strings else None
-    headers = {x.split('=', 1) for x in headers} if headers else None
+    query_strings = dict([tuple(x.split('=', 1)) for x in query_strings]) if query_strings else None
+    headers = dict([tuple(x.split('=', 1)) for x in headers]) if headers else {}
+    headers.update({
+        'User-Agent': UA_AGENT,
+        'x-ms-client-request-id': str(uuid.uuid4()),
+    })
+
+    # TODO: upload telemetry
+    # TODO: see whether .text will ever throw
+
     if not skip_auth:
         from azure.cli.core._profile import Profile
         resource_url = resource_url
@@ -1805,16 +1814,25 @@ def invoke_request(cmd, method, url,
         headers = headers or {}
         headers['Authorization'] = '{} {}'.format(toke_type, token)
 
-    # TODO:
-    # 'Accept-Encoding': 'gzip, deflate, br',
-    # 'x-ms-client-request-id': str(uuid.uuid4()),
-    # 'User-Agent': UA_AGENT
-
     r = method(url, params=query_strings, data=pay_load, headers=headers,
                verify=not should_disable_connection_verify())
     if not r.ok:
         raise CLIError(r.reason)
-    return r.json()  # TODO: try delete which produces no result
+    if output_file:
+        with open(output_file, 'wb') as fd:
+            for chunk in r.iter_content(chunk_size=128):
+                fd.write(chunk)
+    elif r.content:
+        try:
+            return r.json()
+        except ValueError:
+            logger.warning('Not a json response, outputing to stdout')
+            try:
+                print(r.text)
+            except:
+                logger.warning("Can't retrieve text from response text. "
+                               "Please consider using --output-file for CLI to write to a file")
+                raise
 
 
 class _ResourceUtils(object):  # pylint: disable=too-many-instance-attributes
