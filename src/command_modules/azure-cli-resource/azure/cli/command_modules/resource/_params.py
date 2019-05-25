@@ -276,3 +276,8 @@ def load_arguments(self, _):
     with self.argument_context('account management-group update') as c:
         c.argument('display_name', options_list=['--display-name', '-d'])
         c.argument('parent_id', options_list=['--parent', '-p'])
+
+    with self.argument_context('rest') as c:
+        c.ignore('_subscription')  # TODO: ensure this does work 
+        c.argument('method', arg_type=get_enum_type(['head', 'get', 'put', 'post', 'delete', 'options'], default='get'),
+                   help='HTTP request method')

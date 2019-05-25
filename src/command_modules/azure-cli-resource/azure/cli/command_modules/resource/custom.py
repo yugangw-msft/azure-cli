@@ -1770,6 +1770,53 @@ def list_resource_links(cmd, scope=None, filter_string=None):
 # endregion
 
 
+def invoke_request(cmd, method, url,
+                   headers=None, query_strings=None, pay_load=None, skip_auth=False, resource_url=None):
+    import six
+
+    import requests
+    from azure.cli.core.util import should_disable_connection_verify
+
+    methods = {
+        'head': requests.head,
+        'get': requests.get,
+        'put': requests.put,
+        'post': requests.post,
+        'delete': requests.delete,
+        'options': requests.options
+    }
+    method = methods.get(method)
+
+    query_strings = {x.split('=', 1) for x in query_strings} if query_strings else None
+    headers = {x.split('=', 1) for x in headers} if headers else None
+    if not skip_auth:
+        from azure.cli.core._profile import Profile
+        resource_url = resource_url
+        if not resource_url: 
+            endpoints = cmd.cli_ctx.cloud.endpoints
+            for p in [x for x in dir(endpoints) if not x.startswith('_')]:
+                value = getattr(endpoints, p)
+                if isinstance(value, six.string_types) and url.lower().startswith(value.lower()):
+                    resource_url = value
+                    break
+        profile = Profile()
+        token_info, _, _ = profile.get_raw_token(resource_url)
+        toke_type, token, _ = token_info
+        headers = headers or {}
+        headers['Authorization'] = '{} {}'.format(toke_type, token)
+
+    # TODO:
+    # 'Accept-Encoding': 'gzip, deflate, br',
+    # 'x-ms-client-request-id': str(uuid.uuid4()),
+    # 'User-Agent': UA_AGENT
+
+    r = method(url, params=query_strings, data=pay_load, headers=headers,
+               verify=not should_disable_connection_verify())
+    if not r.ok:
+        raise CLIError(r.reason)
+    return r.json()  # TODO: try delete which produces no result
+
+
 class _ResourceUtils(object):  # pylint: disable=too-many-instance-attributes
     def __init__(self, cli_ctx,
                  resource_group_name=None, resource_provider_namespace=None,
