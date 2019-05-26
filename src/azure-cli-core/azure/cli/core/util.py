@@ -491,6 +491,66 @@ def check_connectivity(url='https://example.org', max_retries=5, timeout=1):
     return success
 
 
+def send_raw_request(cli_ctx, method, url, headers=None, query_strings=None,  # pylint: disable=too-many-locals
+                     payload=None, skip_auth=False, resource=None, output_file=None):
+    import uuid
+    import requests
+    from azure.cli.core.commands.client_factory import UA_AGENT
+
+    result = {}
+    for s in headers or []:
+        try:
+            temp = shell_safe_json_parse(s)
+            result.update(temp)
+        except CLIError:
+            key, value = s.split('=', 1)
+            result[key] = value
+    headers = result
+    headers.update({
+        'User-Agent': UA_AGENT,
+        'x-ms-client-request-id': str(uuid.uuid4()),
+    })
+
+    result = {}
+    for s in query_strings or []:
+        try:
+            temp = shell_safe_json_parse(s)
+            result.update(temp)
+        except CLIError:
+            key, value = s.split('=', 1)
+            result[key] = value
+    query_strings = result or None
+
+    if not skip_auth:
+        from azure.cli.core._profile import Profile
+        if not resource:
+            endpoints = cli_ctx.cloud.endpoints
+            for p in [x for x in dir(endpoints) if not x.startswith('_')]:
+                value = getattr(endpoints, p)
+                if isinstance(value, six.string_types) and url.lower().startswith(value.lower()):
+                    resource = value
+                    break
+        profile = Profile()
+        token_info, _, _ = profile.get_raw_token(resource)
+        logger.debug('Retrievd AAD token for resource: %s', resource or 'ARM')
+        toke_type, token, _ = token_info
+        headers = headers or {}
+        headers['Authorization'] = '{} {}'.format(toke_type, token)
+
+    r = requests.request(method, url, params=query_strings, data=payload, headers=headers,
+                         verify=not should_disable_connection_verify())
+    if not r.ok:
+        reason = r.reason
+        if r.text:
+            reason += '({})'.format(r.text)
+        raise CLIError(reason)
+    if output_file:
+        with open(output_file, 'wb') as fd:
+            for chunk in r.iter_content(chunk_size=128):
+                fd.write(chunk)
+    return r
+
+
 class ConfiguredDefaultSetter(object):
 
     def __init__(self, cli_config, use_local_config=None):

@@ -278,9 +278,15 @@ def load_arguments(self, _):
         c.argument('parent_id', options_list=['--parent', '-p'])
 
     with self.argument_context('rest') as c:
-        c.ignore('_subscription')  # TODO: ensure this does work 
-        c.argument('method', arg_type=get_enum_type(['head', 'get', 'put', 'post', 'delete', 'options'], default='get'),
+        c.ignore('_subscription')  # TODO: ensure this does work
+        c.argument('method', arg_type=get_enum_type(['head', 'get', 'put', 'post', 'delete', 'options', 'patch'], default='get'),
                    help='HTTP request method')
-        c.argument('headers', nargs='+')
-        c.argument('query_strings', nargs='+')
-        c.argument('skip_auth', action='store_true')
+        c.argument('url', help="request url")
+        c.argument('headers', nargs='+', help="Space-separated appsettings in KEY=VALUE format or JSON string. Use @{file} to load from a file")
+        c.argument('query_strings', nargs='+', help='Space-separated appsettings in KEY=VALUE format or JSON string. Use @{file} to load from a file')
+        c.argument('skip_auth', action='store_true', help='skip auto append "Authorization" header')
+        c.argument('payload', help='request payload')
+        c.argument('output_file', help='save response payload to a file')
+        c.argument('resource', help='Resource which CLI would acquire token so to put on "Authorization" header. '
+                   'By default, CLI cam figure this out based on --url, unless your are using uncommon one')
+

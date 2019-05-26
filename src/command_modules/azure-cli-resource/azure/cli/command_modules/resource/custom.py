@@ -1770,69 +1770,17 @@ def list_resource_links(cmd, scope=None, filter_string=None):
 # endregion
 
 
-def invoke_request(cmd, method, url,
-                   headers=None, query_strings=None, pay_load=None, skip_auth=False, resource_url=None, output_file=None):
-    import six
-
-    import requests
-    from azure.cli.core.util import should_disable_connection_verify
-    from azure.cli.core.commands.client_factory import UA_AGENT
-
-    methods = {
-        'head': requests.head,
-        'get': requests.get,
-        'put': requests.put,
-        'post': requests.post,
-        'delete': requests.delete,
-        'options': requests.options
-    }
-    method = methods.get(method)
-
-    query_strings = dict([tuple(x.split('=', 1)) for x in query_strings]) if query_strings else None
-    headers = dict([tuple(x.split('=', 1)) for x in headers]) if headers else {}
-    headers.update({
-        'User-Agent': UA_AGENT,
-        'x-ms-client-request-id': str(uuid.uuid4()),
-    })
-
-    # TODO: upload telemetry
-    # TODO: see whether .text will ever throw
-
-    if not skip_auth:
-        from azure.cli.core._profile import Profile
-        resource_url = resource_url
-        if not resource_url: 
-            endpoints = cmd.cli_ctx.cloud.endpoints
-            for p in [x for x in dir(endpoints) if not x.startswith('_')]:
-                value = getattr(endpoints, p)
-                if isinstance(value, six.string_types) and url.lower().startswith(value.lower()):
-                    resource_url = value
-                    break
-        profile = Profile()
-        token_info, _, _ = profile.get_raw_token(resource_url)
-        toke_type, token, _ = token_info
-        headers = headers or {}
-        headers['Authorization'] = '{} {}'.format(toke_type, token)
-
-    r = method(url, params=query_strings, data=pay_load, headers=headers,
-               verify=not should_disable_connection_verify())
-    if not r.ok:
-        raise CLIError(r.reason)
-    if output_file:
-        with open(output_file, 'wb') as fd:
-            for chunk in r.iter_content(chunk_size=128):
-                fd.write(chunk)
-    elif r.content:
+def rest_call(cmd, method, url, headers=None, query_strings=None,
+              payload=None, skip_auth=False, resource=None, output_file=None):
+    from azure.cli.core.util import send_raw_request
+    r = send_raw_request(cmd.cli_ctx, method, url, headers, query_strings, payload, skip_auth, resource, output_file)
+    if not output_file and r.content:
         try:
             return r.json()
         except ValueError:
-            logger.warning('Not a json response, outputing to stdout')
-            try:
-                print(r.text)
-            except:
-                logger.warning("Can't retrieve text from response text. "
-                               "Please consider using --output-file for CLI to write to a file")
-                raise
+            logger.warning('Not a json response, outputing to stdout. For binary data '
+                           'suggest use "--output-file" to write to a file')
+            print(r.text)
 
 
 class _ResourceUtils(object):  # pylint: disable=too-many-instance-attributes

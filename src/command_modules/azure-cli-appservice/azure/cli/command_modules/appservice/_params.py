@@ -446,3 +446,10 @@ def load_arguments(self, _):
         c.argument('allow_force_push', help="If Azure DevOps repository is not clean, should it overwrite remote content?", arg_type=get_three_state_flag(return_label=True), required=False)
         c.argument('github_pat', help="Github personal access token for creating pipeline from Github repository", required=False)
         c.argument('github_repository', help="Fullname of your Github repository (e.g. Azure/azure-cli)", required=False)
+
+    with self.argument_context('functionapp key') as c:
+        c.argument('functionapp_name', help='name of the functionapp', id_part='name')
+        c.argument('function_name', help='name of the function')
+        c.argument('key_name', options_list=['--key-name', '-k'], help='key name')
+        c.argument('key_value', options_list=['--key-value', '-v'], help='key value. If missing,key will be auto generated')
+        c.argument('use_host_keys_collection', arg_type=get_three_state_flag(), help='access host keys collection')

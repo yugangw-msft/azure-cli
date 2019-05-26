@@ -2662,3 +2662,73 @@ def _configure_default_logging(cmd, rg_name, name):
     return config_diagnostics(cmd, rg_name, name,
                               application_logging=True, web_server_logging='filesystem',
                               docker_container_logging='true')
+
+
+def _get_function_admin_url(functionapp, function_name, use_host_keys_collection, key_name=None):
+    if bool(function_name) == bool(use_host_keys_collection):
+        raise CLIError('usage error: --function-name FUNCTION | --use-host-keys-collection')
+    if use_host_keys_collection:
+        url = "https://{}/admin/host/keys".format(functionapp.default_host_name)
+    else:
+        url = "https://{}/admin/functions/{}/keys".format(functionapp.default_host_name, function_name)
+    if key_name:
+        url += '/' + key_name
+    return url
+
+
+def _get_function_admin_site_token(cmd, resource_group_name, functionapp_name, functionapp):
+    from azure.cli.core.util import send_raw_request
+    content = _generic_site_operation(cmd.cli_ctx, resource_group_name, functionapp_name,
+                                      'list_publishing_credentials', None)
+    cred_result = content.result()
+    scm_host = next(x for x in functionapp.enabled_host_names if '.scm.' in x)
+    url = 'https://{}/api/functions/admin/token'.format(scm_host)
+    headers = ['Authorization=Basic {}:{}'.format(cred_result.publishing_user_name, cred_result.publishing_password)]
+    r = send_raw_request(cmd.cli_ctx, 'get', url, headers=headers, skip_auth=False)
+    return 'Authorization=Bearer ' + r.text.strip("'").strip('"')
+
+
+def list_functionapp_keys(cmd, resource_group_name, functionapp_name,
+                          function_name=None, use_host_keys_collection=None):
+    from azure.cli.core.util import send_raw_request
+    functionapp = _generic_site_operation(cmd.cli_ctx, resource_group_name, functionapp_name, 'get')
+    auth_header = _get_function_admin_site_token(cmd, resource_group_name, functionapp_name, functionapp)
+
+    headers = [auth_header]
+    url = _get_function_admin_url(functionapp, function_name, use_host_keys_collection)
+    r = send_raw_request(cmd.cli_ctx, 'get', url, headers=headers, skip_auth=True)
+    return r.json()
+
+
+def update_functionapp_key(cmd, resource_group_name, functionapp_name, key_name, key_value=None,
+                           function_name=None, use_host_keys_collection=None):
+    from azure.cli.core.util import send_raw_request
+    functionapp = _generic_site_operation(cmd.cli_ctx, resource_group_name, functionapp_name, 'get')
+    auth_header = _get_function_admin_site_token(cmd, resource_group_name, functionapp_name, functionapp)
+    headers = [auth_header]
+
+    url = _get_function_admin_url(functionapp, function_name, use_host_keys_collection, key_name)
+    method = 'put' if key_value else 'post'
+    payload = None
+    if key_value:
+        payload = {
+            "name": key_name,
+            "value": key_value
+        }
+        headers.append('Content-Type=Application/json')
+    r = send_raw_request(cmd.cli_ctx, method, url, headers=headers,
+                         payload=json.dumps(payload) if payload else None, skip_auth=True)
+
+    return r.json()
+
+
+def delete_functionapp_key(cmd, resource_group_name, functionapp_name, key_name,
+                           function_name=None, use_host_keys_collection=None):
+    from azure.cli.core.util import send_raw_request
+    functionapp = _generic_site_operation(cmd.cli_ctx, resource_group_name, functionapp_name, 'get')
+    auth_header = _get_function_admin_site_token(cmd, resource_group_name, functionapp_name, functionapp)
+    headers = [auth_header]
+
+    url = _get_function_admin_url(functionapp, function_name, use_host_keys_collection, key_name)
+
+    send_raw_request(cmd.cli_ctx, 'delete', url, headers=headers, skip_auth=True)

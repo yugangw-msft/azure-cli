@@ -292,3 +292,8 @@ def load_command_table(self, _):
 
     with self.command_group('functionapp devops-pipeline') as g:
         g.custom_command('create', 'create_devops_build')
+
+    with self.command_group('functionapp key') as g:
+        g.custom_command('list', 'list_functionapp_keys')
+        g.custom_command('update', 'update_functionapp_key')
+        g.custom_command('delete', 'delete_functionapp_key')

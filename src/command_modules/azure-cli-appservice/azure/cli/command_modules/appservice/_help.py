@@ -1505,3 +1505,23 @@ helps['webapp create-remote-connection'] = """
     type: command
     short-summary: Creates a remote connection using a tcp tunnel to your web app
 """
+
+helps['functionapp key'] = """
+    type: group
+    short-summary: manage function keys
+"""
+
+helps['functionapp key list'] = """
+    type: command
+    short-summary: list function keys
+"""
+
+helps['functionapp key update'] = """
+    type: command
+    short-summary: update function key
+"""
+
+helps['functionapp key delete'] = """
+    type: command
+    short-summary: delete a function key
+"""

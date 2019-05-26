@@ -2,6 +2,8 @@
 
 Release History
 ===============
+* functionapp: support key management
+
 0.2.20
 ++++++
 * functionapp: deprecated `az functionapp devops-build` command will be removed in next release
