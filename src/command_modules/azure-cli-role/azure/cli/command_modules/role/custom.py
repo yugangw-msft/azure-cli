@@ -865,7 +865,7 @@ def admin_consent(cmd, identifier):
     url = 'https://main.iam.ad.ext.azure.com/api/RegisteredApplications/{}/Consent?onBehalfOfAll=true'.format(
         application.app_id)
     send_raw_request(cmd.cli_ctx, 'post', url, resource='74658136-14ec-4630-ad9b-26e160ff0fc6')
- 
+
 
 def grant_application(cmd, identifier, api, consent_type=None, principal_id=None,
                       expires='1', scope='user_impersonation'):

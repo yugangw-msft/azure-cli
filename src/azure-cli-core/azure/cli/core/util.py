@@ -491,8 +491,8 @@ def check_connectivity(url='https://example.org', max_retries=5, timeout=1):
     return success
 
 
-def send_raw_request(cli_ctx, method, url, headers=None, query_strings=None,  # pylint: disable=too-many-locals
-                     payload=None, skip_auth=False, resource=None, output_file=None):
+def send_raw_request(cli_ctx, method, url, headers=None, uri_parameters=None,  # pylint: disable=too-many-locals
+                     body=None, skip_authorization_header=False, resource=None, output_file=None):
     import uuid
     import requests
     from azure.cli.core.commands.client_factory import UA_AGENT
@@ -512,16 +512,16 @@ def send_raw_request(cli_ctx, method, url, headers=None, query_strings=None,  # 
     })
 
     result = {}
-    for s in query_strings or []:
+    for s in uri_parameters or []:
         try:
             temp = shell_safe_json_parse(s)
             result.update(temp)
         except CLIError:
             key, value = s.split('=', 1)
             result[key] = value
-    query_strings = result or None
+    uri_parameters = result or None
 
-    if not skip_auth:
+    if not skip_authorization_header:
         from azure.cli.core._profile import Profile
         if not resource:
             endpoints = cli_ctx.cloud.endpoints
@@ -537,7 +537,7 @@ def send_raw_request(cli_ctx, method, url, headers=None, query_strings=None,  # 
         headers = headers or {}
         headers['Authorization'] = '{} {}'.format(toke_type, token)
 
-    r = requests.request(method, url, params=query_strings, data=payload, headers=headers,
+    r = requests.request(method, url, params=uri_parameters, data=body, headers=headers,
                          verify=not should_disable_connection_verify())
     if not r.ok:
         reason = r.reason

@@ -2684,7 +2684,7 @@ def _get_function_admin_site_token(cmd, resource_group_name, functionapp_name, f
     scm_host = next(x for x in functionapp.enabled_host_names if '.scm.' in x)
     url = 'https://{}/api/functions/admin/token'.format(scm_host)
     headers = ['Authorization=Basic {}:{}'.format(cred_result.publishing_user_name, cred_result.publishing_password)]
-    r = send_raw_request(cmd.cli_ctx, 'get', url, headers=headers, skip_auth=False)
+    r = send_raw_request(cmd.cli_ctx, 'get', url, headers=headers, skip_authorization_header=False)
     return 'Authorization=Bearer ' + r.text.strip("'").strip('"')
 
 
@@ -2696,7 +2696,7 @@ def list_functionapp_keys(cmd, resource_group_name, functionapp_name,
 
     headers = [auth_header]
     url = _get_function_admin_url(functionapp, function_name, use_host_keys_collection)
-    r = send_raw_request(cmd.cli_ctx, 'get', url, headers=headers, skip_auth=True)
+    r = send_raw_request(cmd.cli_ctx, 'get', url, headers=headers, skip_authorization_header=True)
     return r.json()
 
 
@@ -2717,7 +2717,7 @@ def update_functionapp_key(cmd, resource_group_name, functionapp_name, key_name,
         }
         headers.append('Content-Type=Application/json')
     r = send_raw_request(cmd.cli_ctx, method, url, headers=headers,
-                         payload=json.dumps(payload) if payload else None, skip_auth=True)
+                         body=json.dumps(payload) if payload else None, skip_authorization_header=True)
 
     return r.json()
 
@@ -2731,4 +2731,4 @@ def delete_functionapp_key(cmd, resource_group_name, functionapp_name, key_name,
 
     url = _get_function_admin_url(functionapp, function_name, use_host_keys_collection, key_name)
 
-    send_raw_request(cmd.cli_ctx, 'delete', url, headers=headers, skip_auth=True)
+    send_raw_request(cmd.cli_ctx, 'delete', url, headers=headers, skip_authorization_header=True)

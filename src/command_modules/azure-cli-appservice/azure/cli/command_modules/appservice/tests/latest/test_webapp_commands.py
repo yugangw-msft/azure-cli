@@ -1068,10 +1068,9 @@ class FunctionAppKeyManagementE2ETest(ScenarioTest):
     @ResourceGroupPreparer(name_prefix='cli-function-key-e2e', location='westus')
     @StorageAccountPreparer()
     def test_functionapp_key_management(self, resource_group, storage_account):
-        
         functionapp_name = self.create_random_name('cli-function-key-e2e', 40)
         id = self.cmd('functionapp create -g {} -n {} -c westus -s {}'
-                 .format(resource_group, functionapp_name, storage_account)).get_output_in_json()['id']
+                      .format(resource_group, functionapp_name, storage_account)).get_output_in_json()['id']
         self.kwargs.update({
             'key_name': 'key',
             'key_value': 'password',
