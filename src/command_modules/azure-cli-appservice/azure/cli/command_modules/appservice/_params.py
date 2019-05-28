@@ -448,7 +448,7 @@ def load_arguments(self, _):
         c.argument('github_repository', help="Fullname of your Github repository (e.g. Azure/azure-cli)", required=False)
 
     with self.argument_context('functionapp key') as c:
-        c.argument('functionapp_name', help='name of the functionapp', id_part='name')
+        c.argument('functionapp_name', help='name of the functionapp')
         c.argument('function_name', help='name of the function')
         c.argument('key_name', options_list=['--key-name', '-k'], help='key name')
         c.argument('key_value', options_list=['--key-value', '-v'], help='key value. If missing,key will be auto generated')

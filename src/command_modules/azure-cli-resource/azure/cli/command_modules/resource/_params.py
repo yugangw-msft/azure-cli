@@ -287,4 +287,5 @@ def load_arguments(self, _):
         c.argument('body', help='request body')
         c.argument('output_file', help='save response payload to a file')
         c.argument('resource', help='Resource which CLI would acquire token so to put on the "Authorization" header. '
-                   'By default, CLI can figure this out based on --url, unless you use ones not in the list of "az cloud show"')
+                   'By default, CLI can figure this out based on --url, unless you use ones not in the list '
+                   'of "az cloud show"')

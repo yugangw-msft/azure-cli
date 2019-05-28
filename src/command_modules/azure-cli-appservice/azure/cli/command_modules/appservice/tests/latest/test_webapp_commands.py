@@ -1075,17 +1075,19 @@ class FunctionAppKeyManagementE2ETest(ScenarioTest):
             'key_name': 'key',
             'key_value': 'password',
             'key_name2': 'key2',
-            'id': id
+            'id': id,
+            'rg': resource_group,
+            'func_app': functionapp_name,
         })
 
-        self.cmd('functionapp key update --ids {id} -k {key_name} -v {key_value} --use-host-keys-collection')
-        self.cmd('functionapp key update --ids {id} -k {key_name2} --use-host-keys-collection ')
-        self.cmd('functionapp key list --ids {id} --use-host-keys-collection --query keys', checks=[
+        self.cmd('functionapp key update -g {rg} --functionapp-name {func_app} -k {key_name} -v {key_value} --use-host-keys-collection')
+        self.cmd('functionapp key update -g {rg} --functionapp-name {func_app} -k {key_name2} --use-host-keys-collection ')
+        self.cmd('functionapp key list -g {rg} --functionapp-name {func_app} --use-host-keys-collection --query keys', checks=[
             self.check("[?name=='{key_name}']|[0].value", self.kwargs['key_value']),
             self.check("length([?name=='{key_name2}'])", 1)
         ])
-        self.cmd('functionapp key delete --ids {id} -k {key_name} --use-host-keys-collection')
-        self.cmd('functionapp key list --ids {id} --use-host-keys-collection --query keys', checks=[
+        self.cmd('functionapp key delete -g {rg} --functionapp-name {func_app} -k {key_name} --use-host-keys-collection')
+        self.cmd('functionapp key list -g {rg} --functionapp-name {func_app} --use-host-keys-collection --query keys', checks=[
             self.check("length([?name=='{key_name}'])", 0),
             self.check("length([?name=='{key_name2}'])", 1)
         ])
