@@ -2403,17 +2403,17 @@ def remove_triggered_webjob(cmd, resource_group_name, name, webjob_name, slot=No
     return client.web_apps.delete_triggered_web_job(resource_group_name, name, webjob_name)
 
 
-def list_hc(cmd, name, resource_group, slot=None):
-    linux_webapp = show_webapp(cmd, resource_group, name, slot)
+def list_hc(cmd, name, resource_group_name, slot=None):
+    linux_webapp = show_webapp(cmd, resource_group_name, name, slot)
     is_linux = linux_webapp.reserved
     if is_linux:
         return logger.warning("hybrid connections not supported on a linux app.")
 
     client = web_client_factory(cmd.cli_ctx)
     if slot is None:
-        listed_vals = client.web_apps.list_hybrid_connections(resource_group, name)
+        listed_vals = client.web_apps.list_hybrid_connections(resource_group_name, name)
     else:
-        listed_vals = client.web_apps.list_hybrid_connections_slot(resource_group, name, slot)
+        listed_vals = client.web_apps.list_hybrid_connections_slot(resource_group_name, name, slot)
 
     # reformats hybrid connection, to prune unnecessary fields
     mod_list = []
@@ -2439,8 +2439,8 @@ def list_hc(cmd, name, resource_group, slot=None):
     return mod_list
 
 
-def add_hc(cmd, name, resource_group, namespace, hybrid_connection, slot=None):
-    linux_webapp = show_webapp(cmd, resource_group, name, slot)
+def add_hc(cmd, name, resource_group_name, namespace, hybrid_connection, slot=None):
+    linux_webapp = show_webapp(cmd, resource_group_name, name, slot)
     is_linux = linux_webapp.reserved
     if is_linux:
         return logger.warning("hybrid connections not supported on a linux app.")
@@ -2506,10 +2506,10 @@ def add_hc(cmd, name, resource_group, namespace, hybrid_connection, slot=None):
                           send_key_value=hy_co_keys.primary_key,
                           service_bus_suffix=".servicebus.windows.net")
     if slot is None:
-        return_hc = web_client.web_apps.create_or_update_hybrid_connection(resource_group, name, namespace,
+        return_hc = web_client.web_apps.create_or_update_hybrid_connection(resource_group_name, name, namespace,
                                                                            hybrid_connection, hc)
     else:
-        return_hc = web_client.web_apps.create_or_update_hybrid_connection_slot(resource_group, name, namespace,
+        return_hc = web_client.web_apps.create_or_update_hybrid_connection_slot(resource_group_name, name, namespace,
                                                                                 hybrid_connection, hc, slot)
 
     # reformats hybrid connection, to prune unnecessary fields
@@ -2529,11 +2529,11 @@ def add_hc(cmd, name, resource_group, namespace, hybrid_connection, slot=None):
 
 
 # set the key the apps use to connect with the hybrid connection
-def set_hc_key(cmd, plan, resource_group, namespace, hybrid_connection, key_type):
+def set_hc_key(cmd, plan, resource_group_name, namespace, hybrid_connection, key_type):
     web_client = web_client_factory(cmd.cli_ctx)
 
     # extract the hybrid connection resource group
-    asp_hy_co = web_client.app_service_plans.get_hybrid_connection(resource_group, plan, namespace, hybrid_connection)
+    asp_hy_co = web_client.app_service_plans.get_hybrid_connection(resource_group_name, plan, namespace, hybrid_connection)
     arm_uri = asp_hy_co.relay_arm_uri
     split_uri = arm_uri.split("resourceGroups/")
     resource_group_strings = split_uri[1].split('/')
@@ -2579,7 +2579,7 @@ def set_hc_key(cmd, plan, resource_group, namespace, hybrid_connection, key_type
         logger.warning("Key type is invalid - must be primary or secondary")
         return
 
-    apps = web_client.app_service_plans.list_web_apps_by_hybrid_connection(resource_group, plan, namespace,
+    apps = web_client.app_service_plans.list_web_apps_by_hybrid_connection(resource_group_name, plan, namespace,
                                                                            hybrid_connection)
     # changes the key for every app that uses that hybrid connection
     for x in apps:
@@ -2594,36 +2594,36 @@ def set_hc_key(cmd, plan, resource_group, namespace, hybrid_connection, key_type
         web_client.web_apps.update_hybrid_connection(app_resource_group, app_name, namespace,
                                                      hybrid_connection, hc)
 
-    return web_client.app_service_plans.list_web_apps_by_hybrid_connection(resource_group, plan,
+    return web_client.app_service_plans.list_web_apps_by_hybrid_connection(resource_group_name, plan,
                                                                            namespace, hybrid_connection)
 
 
-def appservice_list_vnet(cmd, resource_group, plan):
+def appservice_list_vnet(cmd, resource_group_name, plan):
     web_client = web_client_factory(cmd.cli_ctx)
-    return web_client.app_service_plans.list_vnets(resource_group, plan)
+    return web_client.app_service_plans.list_vnets(resource_group_name, plan)
 
 
-def remove_hc(cmd, resource_group, name, namespace, hybrid_connection, slot=None):
-    linux_webapp = show_webapp(cmd, resource_group, name, slot)
+def remove_hc(cmd, resource_group_name, name, namespace, hybrid_connection, slot=None):
+    linux_webapp = show_webapp(cmd, resource_group_name, name, slot)
     is_linux = linux_webapp.reserved
     if is_linux:
         return logger.warning("hybrid connections not supported on a linux app.")
 
     client = web_client_factory(cmd.cli_ctx)
     if slot is None:
-        return_hc = client.web_apps.delete_hybrid_connection(resource_group, name, namespace, hybrid_connection)
+        return_hc = client.web_apps.delete_hybrid_connection(resource_group_name, name, namespace, hybrid_connection)
     else:
-        return_hc = client.web_apps.delete_hybrid_connection_slot(resource_group, name, namespace, hybrid_connection,
+        return_hc = client.web_apps.delete_hybrid_connection_slot(resource_group_name, name, namespace, hybrid_connection,
                                                                   slot)
     return return_hc
 
 
-def list_vnet_integration(cmd, name, resource_group, slot=None):
+def list_vnet_integration(cmd, name, resource_group_name, slot=None):
     client = web_client_factory(cmd.cli_ctx)
     if slot is None:
-        result = list(client.web_apps.list_vnet_connections(resource_group, name))
+        result = list(client.web_apps.list_vnet_connections(resource_group_name, name))
     else:
-        result = list(client.web_apps.list_vnet_connections_slot(resource_group, name, slot))
+        result = list(client.web_apps.list_vnet_connections_slot(resource_group_name, name, slot))
     mod_list = []
 
     # reformats the vnet entry, removing unecessary information
@@ -2660,7 +2660,7 @@ def list_vnet_integration(cmd, name, resource_group, slot=None):
     return mod_list
 
 
-def add_vnet_integration(cmd, name, resource_group, vnet, subnet, slot=None):
+def add_vnet_integration(cmd, name, resource_group_name, vnet, subnet, slot=None):
     client = web_client_factory(cmd.cli_ctx)
     vnet_client = network_client_factory(cmd.cli_ctx)
 
@@ -2682,9 +2682,9 @@ def add_vnet_integration(cmd, name, resource_group, vnet, subnet, slot=None):
         i = i + 1
 
     if slot is None:
-        swift_connection_info = client.web_apps.get_swift_virtual_network_connection(resource_group, name)
+        swift_connection_info = client.web_apps.get_swift_virtual_network_connection(resource_group_name, name)
     else:
-        swift_connection_info = client.web_apps.get_swift_virtual_network_connection_slot(resource_group, name, slot)
+        swift_connection_info = client.web_apps.get_swift_virtual_network_connection_slot(resource_group_name, name, slot)
 
     # check to see if the connection would be supported
     if swift_connection_info.swift_supported is not True:
@@ -2713,9 +2713,9 @@ def add_vnet_integration(cmd, name, resource_group, vnet, subnet, slot=None):
                                     swift_supported=True)
 
     if slot is None:
-        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection(resource_group, name, swiftVnet)
+        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection(resource_group_name, name, swiftVnet)
     else:
-        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection_slot(resource_group, name,
+        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection_slot(resource_group_name, name,
                                                                                              swiftVnet, slot)
     # reformats the vnet entry, removing unecessary information
     id_strings = return_vnet.id.split('/')
@@ -2731,12 +2731,12 @@ def add_vnet_integration(cmd, name, resource_group, vnet, subnet, slot=None):
     return mod_vnet
 
 
-def remove_vnet_integration(cmd, name, resource_group, slot=None):
+def remove_vnet_integration(cmd, name, resource_group_name, slot=None):
     client = web_client_factory(cmd.cli_ctx)
     if slot is None:
-        return_vnet = client.web_apps.delete_swift_virtual_network(resource_group, name)
+        return_vnet = client.web_apps.delete_swift_virtual_network(resource_group_name, name)
     else:
-        return_vnet = client.web_apps.delete_swift_virtual_network_slot(resource_group, name, slot)
+        return_vnet = client.web_apps.delete_swift_virtual_network_slot(resource_group_name, name, slot)
     return return_vnet
 
 

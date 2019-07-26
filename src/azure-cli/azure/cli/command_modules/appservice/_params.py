@@ -364,20 +364,17 @@ def load_arguments(self, _):
     with self.argument_context('webapp hybrid-connection') as c:
         c.argument('name', arg_type=webapp_name_arg_type, id_part=None)
         c.argument('slot', help="the name of the slot. Default to the productions slot if not specified")
-        c.argument('resource_group', arg_type=resource_group_name_type)
         c.argument('namespace', help="Hybrid connection namespace")
         c.argument('hybrid_connection', help="Hybrid connection name")
 
     with self.argument_context('functionapp hybrid-connection') as c:
         c.argument('name', id_part=None)
-        c.argument('resource_group', arg_type=resource_group_name_type)
         c.argument('slot', help="the name of the slot. Default to the productions slot if not specified")
         c.argument('namespace', help="Hybrid connection namespace")
         c.argument('hybrid_connection', help="Hybrid connection name")
 
     with self.argument_context('appservice hybrid-connection set-key') as c:
         c.argument('plan', help="Appservice plan")
-        c.argument('resource_group', arg_type=resource_group_name_type)
         c.argument('namespace', help="Hybrid connection namespace")
         c.argument('hybrid_connection', help="Hybrid connection name")
         c.argument('key_type', help="Which key (primary or secondary) should be used")
@@ -411,13 +408,11 @@ def load_arguments(self, _):
     with self.argument_context('webapp vnet-integration') as c:
         c.argument('name', arg_type=webapp_name_arg_type, id_part=None)
         c.argument('slot', help="the name of the slot. Default to the productions slot if not specified")
-        c.argument('resource_group', arg_type=resource_group_name_type)
         c.argument('vnet', help="Vnet name", validator=validate_add_vnet)
         c.argument('subnet', help="Subnet name")
 
     with self.argument_context('functionapp vnet-integration') as c:
         c.argument('name', arg_type=name_arg_type, id_part=None)
-        c.argument('resource_group', arg_type=resource_group_name_type)
         c.argument('slot', help="the name of the slot. Default to the productions slot if not specified")
         c.argument('vnet', help="Vnet name", validator=validate_add_vnet)
         c.argument('subnet', help="Subnet name")

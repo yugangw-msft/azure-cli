@@ -203,25 +203,25 @@ def load_command_table(self, _):
         g.custom_command('list', 'list_deleted_webapp')
         g.custom_command('restore', 'restore_deleted_webapp')
 
-    with self.command_group('webapp hybrid-connection') as g:
+    with self.command_group('webapp hybrid-connection', is_preview=True) as g:
         g.custom_command('list', 'list_hc')
         g.custom_command('add', 'add_hc')
         g.custom_command('remove', 'remove_hc')
 
-    with self.command_group('functionapp hybrid-connection') as g:
+    with self.command_group('functionapp hybrid-connection', is_preview=True) as g:
         g.custom_command('list', 'list_hc')
         g.custom_command('add', 'add_hc')
         g.custom_command('remove', 'remove_hc')
 
-    with self.command_group('appservice hybrid-connection') as g:
+    with self.command_group('appservice hybrid-connection', is_preview=True) as g:
         g.custom_command('set-key', 'set_hc_key')
 
-    with self.command_group('webapp vnet-integration') as g:
+    with self.command_group('webapp vnet-integration', is_preview=True) as g:
         g.custom_command('add', 'add_vnet_integration')
         g.custom_command('list', 'list_vnet_integration')
         g.custom_command('remove', 'remove_vnet_integration')
 
-    with self.command_group('functionapp vnet-integration') as g:
+    with self.command_group('functionapp vnet-integration', is_preview=True) as g:
         g.custom_command('add', 'add_vnet_integration')
         g.custom_command('list', 'list_vnet_integration')
         g.custom_command('remove', 'remove_vnet_integration')
@@ -232,8 +232,8 @@ def load_command_table(self, _):
         g.custom_command('list', 'list_app_service_plans')
         g.show_command('show', 'get')
         g.generic_update_command('update', custom_func_name='update_app_service_plan', setter_arg_name='app_service_plan')
-        g.custom_command('vnet-integration list', 'appservice_list_vnet')
-    with self.command_group('appservice plan vnet-integration') as g:
+        g.custom_command('vnet-integration list', 'appservice_list_vnet', is_preview=True)
+    with self.command_group('appservice plan vnet-integration', is_preview=True) as g:
         g.custom_command('list', 'appservice_list_vnet')
     with self.command_group('appservice') as g:
         g.custom_command('list-locations', 'list_locations', transform=transform_list_location_output)
