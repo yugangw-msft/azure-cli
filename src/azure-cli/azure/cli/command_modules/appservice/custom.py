@@ -2533,7 +2533,8 @@ def set_hc_key(cmd, plan, resource_group_name, namespace, hybrid_connection, key
     web_client = web_client_factory(cmd.cli_ctx)
 
     # extract the hybrid connection resource group
-    asp_hy_co = web_client.app_service_plans.get_hybrid_connection(resource_group_name, plan, namespace, hybrid_connection)
+    asp_hy_co = web_client.app_service_plans.get_hybrid_connection(resource_group_name, plan,
+                                                                   namespace, hybrid_connection)
     arm_uri = asp_hy_co.relay_arm_uri
     split_uri = arm_uri.split("resourceGroups/")
     resource_group_strings = split_uri[1].split('/')
@@ -2613,8 +2614,8 @@ def remove_hc(cmd, resource_group_name, name, namespace, hybrid_connection, slot
     if slot is None:
         return_hc = client.web_apps.delete_hybrid_connection(resource_group_name, name, namespace, hybrid_connection)
     else:
-        return_hc = client.web_apps.delete_hybrid_connection_slot(resource_group_name, name, namespace, hybrid_connection,
-                                                                  slot)
+        return_hc = client.web_apps.delete_hybrid_connection_slot(resource_group_name, name, namespace,
+                                                                  hybrid_connection, slot)
     return return_hc
 
 
@@ -2684,7 +2685,8 @@ def add_vnet_integration(cmd, name, resource_group_name, vnet, subnet, slot=None
     if slot is None:
         swift_connection_info = client.web_apps.get_swift_virtual_network_connection(resource_group_name, name)
     else:
-        swift_connection_info = client.web_apps.get_swift_virtual_network_connection_slot(resource_group_name, name, slot)
+        swift_connection_info = client.web_apps.get_swift_virtual_network_connection_slot(resource_group_name,
+                                                                                          name, slot)
 
     # check to see if the connection would be supported
     if swift_connection_info.swift_supported is not True:
@@ -2713,7 +2715,8 @@ def add_vnet_integration(cmd, name, resource_group_name, vnet, subnet, slot=None
                                     swift_supported=True)
 
     if slot is None:
-        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection(resource_group_name, name, swiftVnet)
+        return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection(resource_group_name, name,
+                                                                                        swiftVnet)
     else:
         return_vnet = client.web_apps.create_or_update_swift_virtual_network_connection_slot(resource_group_name, name,
                                                                                              swiftVnet, slot)
