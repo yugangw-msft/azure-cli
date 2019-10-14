@@ -264,14 +264,22 @@ def load_arguments(self, _):  # pylint: disable=too-many-statements
     with self.argument_context('acr token') as c:
         c.argument('registry_name', options_list=['--registryName', '-r'])
         c.argument('token_name', options_list=['--name', '-n'], help='The name of the token.', required=True)
-        c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token', required=False)
+        c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token')
         c.argument('status', options_list=['--status'], help='The status of the token. Allowed values are "enabled" or "disabled".', required=False, default="enabled")
+        c.argument('repositories', options_list=['--repositories'], nargs='+', help='repository permissions to be added. Use the format "--repositories REPO [ACTION1 ACTION2 ...]" per flag. Valid actions are metadata/read, metadata/write, content/read, content/write and content/delete', action='append', required=False)
 
+    with self.argument_context('acr token') as c:
+        c.argument('expiry', arg_group="Credential", help="password expiry date, e.g. 2220-12-31T11:59:59+00:00")
     with self.argument_context('acr token create') as c:
-        c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token', required=True)
+        c.argument('generate_password1', arg_type=get_three_state_flag(), arg_group="Credential")
+        c.argument('generate_password2', arg_type=get_three_state_flag(), arg_group="Credential")
 
     with self.argument_context('acr token update') as c:
-        c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token. If not specified, running this command will disassociate the current scope map related to the token.', required=False)
+        c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token. Use empty string to disassociate the current scope map', required=False)
+        c.argument('generate_password1', arg_type=get_three_state_flag(), arg_group="Credential")
+        c.argument('generate_password2', arg_type=get_three_state_flag(), arg_group="Credential")
+        c.argument('delete_password1', arg_type=get_three_state_flag(), arg_group="Credential")
+        c.argument('delete_password2', arg_type=get_three_state_flag(), arg_group="Credential")
 
     with self.argument_context('acr token credential generate') as c:
         c.argument('password1', options_list=['--password1'], help='Flag indicating if password1 should be generated.', action='store_true', required=False)
