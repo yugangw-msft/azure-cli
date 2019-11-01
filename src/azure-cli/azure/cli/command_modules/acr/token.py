@@ -30,6 +30,15 @@ def acr_token_create(cmd,
 
     resource_group_name = get_resource_group_name_by_registry_name(cmd.cli_ctx, registry_name, resource_group_name)
 
+    credentials = None
+    try:
+        credentials = client.get(resource_group_name, registry_name, token_name).credentials
+        credentials.certificates = credentials.certificates or None
+        for p in credentials.passwords:
+            p.creation_time = None
+    except CloudError:
+        pass
+
     logger = get_logger(__name__)
     if repository_actions_list:
         scope_map_id = _create_default_scope_map(cmd, resource_group_name, registry_name,
@@ -46,7 +55,8 @@ def acr_token_create(cmd,
         token_name,
         Token(
             scope_map_id=scope_map_id,
-            status=status
+            status=status,
+            credentials=credentials
         )
     )
 
@@ -54,7 +64,8 @@ def acr_token_create(cmd,
         return poller
 
     token = LongRunningOperation(cmd.cli_ctx)(poller)
-    _create_default_passwords(cmd, resource_group_name, registry_name, token, logger)
+    if not token.credentials.passwords:
+        _create_default_passwords(cmd, resource_group_name, registry_name, token, logger)
     return token
 
 
