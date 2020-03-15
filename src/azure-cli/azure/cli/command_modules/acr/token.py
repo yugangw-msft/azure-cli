@@ -21,12 +21,17 @@ def acr_token_create(cmd,
                      repository_actions_list=None,
                      status=None,
                      resource_group_name=None,
-                     no_passwords=None):
+                     no_passwords=None,
+                     active_directory_object=None):
     from knack.log import get_logger
     from ._utils import get_resource_id_by_registry_name
 
     if bool(repository_actions_list) == bool(scope_map_name):
         raise CLIError("usage error: --repository | --scope-map-name")
+    if no_passwords and active_directory_object:
+        raise CLIError("usage error: --no-passwords only apples on token with password credentials")
+
+    no_passwords = no_passwords or active_directory_object
 
     resource_group_name = get_resource_group_name_by_registry_name(cmd.cli_ctx, registry_name, resource_group_name)
 
@@ -40,12 +45,24 @@ def acr_token_create(cmd,
 
     Token = cmd.get_models('Token')
 
+    credentials = None
+    if active_directory_object:
+        from azure.cli.core._profile import Profile
+        TokenCredentialsProperties, ActiveDirectoryObject = cmd.get_models('TokenCredentialsProperties',
+                                                                           'ActiveDirectoryObject')
+        profile = Profile(cli_ctx=cmd.cli_ctx)
+        _, _, tenant_id = profile.get_login_credentials()
+
+        credentials = TokenCredentialsProperties(
+            active_directory_object=ActiveDirectoryObject(object_id=active_directory_object,
+                                                          tenant_id=tenant_id))
     poller = client.create(
         resource_group_name,
         registry_name,
         token_name,
         Token(
             scope_map_id=scope_map_id,
+            credentials=credentials,
             status=status
         )
     )

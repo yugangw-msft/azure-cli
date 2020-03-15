@@ -302,6 +302,7 @@ def load_arguments(self, _):  # pylint: disable=too-many-statements
         c.argument('registry_name', options_list=['--registry', '-r'])
         c.argument('token_name', options_list=['--name', '-n'], help='The name of the token.', required=True)
         c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token', required=False)
+        c.argument('active_directory_object', options_list=['--active-directory-object', '-a'], help='Id of Azure Active Directory Object, including user, service principal or managed identity')
         c.argument('status', options_list=['--status'], arg_type=get_enum_type(TokenStatus),
                    help='The status of the token', required=False, default="enabled")
 

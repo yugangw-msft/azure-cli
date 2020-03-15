@@ -280,7 +280,7 @@ def _get_token_with_username_and_password(login_server,
     return EMPTY_GUID, access_token
 
 
-def _get_credentials(cmd,  # pylint: disable=too-many-statements
+def _get_credentials(cmd,  # pylint: disable=too-many-statements,too-many-branches
                      registry_name,
                      tenant_suffix,
                      username,
@@ -322,8 +322,11 @@ def _get_credentials(cmd,  # pylint: disable=too-many-statements
         login_server_suffix = get_login_server_suffix(cli_ctx)
         if not login_server_suffix:
             raise
-        login_server = '{}{}{}'.format(
-            registry_name, '-{}'.format(tenant_suffix) if tenant_suffix else '', login_server_suffix).lower()
+        if registry_name.lower().endswith(login_server_suffix):
+            login_server = registry_name
+        else:
+            login_server = '{}{}{}'.format(
+                registry_name, '-{}'.format(tenant_suffix) if tenant_suffix else '', login_server_suffix).lower()
 
     # Validate the login server is reachable
     url = 'https://' + login_server + '/v2/'
