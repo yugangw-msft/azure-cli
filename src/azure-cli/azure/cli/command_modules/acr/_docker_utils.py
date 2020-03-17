@@ -328,6 +328,7 @@ def _get_credentials(cmd,  # pylint: disable=too-many-statements,too-many-branch
             login_server = '{}{}{}'.format(
                 registry_name, '-{}'.format(tenant_suffix) if tenant_suffix else '', login_server_suffix).lower()
 
+    print(">>login_server:" + login_server)
     # Validate the login server is reachable
     url = 'https://' + login_server + '/v2/'
     try:
