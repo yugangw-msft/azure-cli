@@ -135,13 +135,13 @@ def load_command_table(self, _):  # pylint: disable=too-many-statements
     )
 
     acr_token_util = CliCommandType(
-        operations_tmpl='azure.cli.command_modules.acr.token#{}',
+        operations_tmpl='azure.cli.command_modules.acr.repo_token#{}',
         table_transformer=token_output_format,
         client_factory=cf_acr_tokens
     )
 
     acr_token_credential_generate_util = CliCommandType(
-        operations_tmpl='azure.cli.command_modules.acr.token#{}',
+        operations_tmpl='azure.cli.command_modules.acr.repo_token#{}',
         table_transformer=token_credential_output_format,
         client_factory=cf_acr_token_credentials
     )
