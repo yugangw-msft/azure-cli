@@ -316,8 +316,8 @@ def _get_credentials(cmd,  # pylint: disable=too-many-statements,too-many-branch
     except Exception as e:
         resource_not_found = str(e)
         logger.debug("Could not get registry from service. Exception: %s", resource_not_found)
-        if not isinstance(e, ResourceNotFound) and _AZ_LOGIN_MESSAGE not in resource_not_found:
-            raise
+        #if not isinstance(e, ResourceNotFound) and _AZ_LOGIN_MESSAGE not in resource_not_found:
+        #    raise
         # Try to use the pre-defined login server suffix to construct login server from registry name.
         login_server_suffix = get_login_server_suffix(cli_ctx)
         if not login_server_suffix:
