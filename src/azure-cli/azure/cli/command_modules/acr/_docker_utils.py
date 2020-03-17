@@ -306,29 +306,28 @@ def _get_credentials(cmd,  # pylint: disable=too-many-statements,too-many-branch
 
     cli_ctx = cmd.cli_ctx
     resource_not_found, registry = None, None
-    try:
-        registry, resource_group_name = get_registry_by_name(cli_ctx, registry_name)
-        login_server = registry.login_server
-        if tenant_suffix:
-            logger.warning(
-                "Obtained registry login server '%s' from service. The specified suffix '%s' is ignored.",
-                login_server, tenant_suffix)
-    except Exception as e:
-        resource_not_found = str(e)
-        logger.debug("Could not get registry from service. Exception: %s", resource_not_found)
-        #if not isinstance(e, ResourceNotFound) and _AZ_LOGIN_MESSAGE not in resource_not_found:
-        #    raise
-        # Try to use the pre-defined login server suffix to construct login server from registry name.
-        login_server_suffix = get_login_server_suffix(cli_ctx)
-        if not login_server_suffix:
-            raise
-        if registry_name.lower().endswith(login_server_suffix):
-            login_server = registry_name
-        else:
+    login_server_suffix = get_login_server_suffix(cli_ctx) or ""
+    if registry_name.lower().endswith(login_server_suffix):
+        login_server = registry_name
+    else:
+        try:
+            registry, resource_group_name = get_registry_by_name(cli_ctx, registry_name)
+            login_server = registry.login_server
+            if tenant_suffix:
+                logger.warning(
+                    "Obtained registry login server '%s' from service. The specified suffix '%s' is ignored.",
+                    login_server, tenant_suffix)
+        except (ResourceNotFound, CLIError) as e:
+            resource_not_found = str(e)
+            logger.debug("Could not get registry from service. Exception: %s", resource_not_found)
+            if not isinstance(e, ResourceNotFound) and _AZ_LOGIN_MESSAGE not in resource_not_found:
+                raise
+            # Try to use the pre-defined login server suffix to construct login server from registry name.
+            if not login_server_suffix:
+                raise
             login_server = '{}{}{}'.format(
                 registry_name, '-{}'.format(tenant_suffix) if tenant_suffix else '', login_server_suffix).lower()
 
-    print(">>login_server:" + login_server)
     # Validate the login server is reachable
     url = 'https://' + login_server + '/v2/'
     try:
