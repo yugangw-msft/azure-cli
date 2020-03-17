@@ -313,7 +313,7 @@ def _get_credentials(cmd,  # pylint: disable=too-many-statements,too-many-branch
             logger.warning(
                 "Obtained registry login server '%s' from service. The specified suffix '%s' is ignored.",
                 login_server, tenant_suffix)
-    except (ResourceNotFound, CLIError) as e:
+    except Exception as e:
         resource_not_found = str(e)
         logger.debug("Could not get registry from service. Exception: %s", resource_not_found)
         if not isinstance(e, ResourceNotFound) and _AZ_LOGIN_MESSAGE not in resource_not_found:
