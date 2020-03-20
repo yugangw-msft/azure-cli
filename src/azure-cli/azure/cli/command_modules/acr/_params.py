@@ -302,9 +302,10 @@ def load_arguments(self, _):  # pylint: disable=too-many-statements
         c.argument('registry_name', options_list=['--registry', '-r'])
         c.argument('token_name', options_list=['--name', '-n'], help='The name of the token.', required=True)
         c.argument('scope_map_name', options_list=['--scope-map'], help='The name of the scope map associated with the token', required=False)
-        c.argument('active_directory_object', options_list=['--active-directory-object', '-a'], help='Id of Azure Active Directory Object, including user, service principal or managed identity')
+        c.argument('active_directory_object', options_list=['--active-directory-object', '-a'], help='Represent AAD entity including a user, service principal, or managed identity. supported format object id, user sign-in name, service principal name or clientId')
         c.argument('status', options_list=['--status'], arg_type=get_enum_type(TokenStatus),
                    help='The status of the token', required=False, default="enabled")
+        c.argument('show_details', options_list=['--show-details', '-d'], arg_type=get_three_state_flag(), help='show extra details such as the AAD object names')
 
     with self.argument_context('acr token create') as c:
         c.argument('scope_map_name', options_list=['--scope-map'],

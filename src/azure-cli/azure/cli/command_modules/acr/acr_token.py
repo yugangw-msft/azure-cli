@@ -12,6 +12,8 @@ SCOPE_MAPS = 'scopeMaps'
 TOKENS = 'tokens'
 DEF_SCOPE_MAP_NAME_TEMPLATE = '{}-scope-map'  # append - to minimize incidental collision
 
+# pylint: disable=too-many-locals
+
 
 def acr_token_create(cmd,
                      client,
@@ -48,13 +50,14 @@ def acr_token_create(cmd,
     credentials = None
     if active_directory_object:
         from azure.cli.core._profile import Profile
+        object_id = _resolve_object_id(cmd.cli_ctx, active_directory_object, fallback_to_object_id=True)
         TokenCredentialsProperties, ActiveDirectoryObject = cmd.get_models('TokenCredentialsProperties',
                                                                            'ActiveDirectoryObject')
         profile = Profile(cli_ctx=cmd.cli_ctx)
         _, _, tenant_id = profile.get_login_credentials()
 
         credentials = TokenCredentialsProperties(
-            active_directory_object=ActiveDirectoryObject(object_id=active_directory_object,
+            active_directory_object=ActiveDirectoryObject(object_id=object_id,
                                                           tenant_id=tenant_id))
     poller = client.create(
         resource_group_name,
@@ -166,28 +169,40 @@ def acr_token_show(cmd,
                    client,
                    registry_name,
                    token_name,
-                   resource_group_name=None):
+                   resource_group_name=None,
+                   show_details=None):
 
     resource_group_name = get_resource_group_name_by_registry_name(cmd.cli_ctx, registry_name, resource_group_name)
 
-    return client.get(
+    acr_token = client.get(
         resource_group_name,
         registry_name,
         token_name
     )
 
+    if show_details:
+        _back_fill_object_name(cmd.cli_ctx, [acr_token])
+
+    return acr_token
+
 
 def acr_token_list(cmd,
                    client,
                    registry_name,
-                   resource_group_name=None):
+                   resource_group_name=None,
+                   show_details=None):
 
     resource_group_name = get_resource_group_name_by_registry_name(cmd.cli_ctx, registry_name, resource_group_name)
 
-    return client.list(
+    acr_tokens = client.list(
         resource_group_name,
         registry_name
     )
+
+    acr_tokens = list(acr_tokens)
+    if show_details:
+        _back_fill_object_name(cmd.cli_ctx, acr_tokens)
+    return acr_tokens
 
 
 # Credential functions
@@ -275,3 +290,82 @@ def acr_token_credential_delete(cmd,
             )
         )
     )
+
+
+def _graph_client_factory(cli_ctx, **_):
+    from azure.cli.core._profile import Profile
+    from azure.cli.core.commands.client_factory import configure_common_settings
+    from azure.graphrbac import GraphRbacManagementClient
+    profile = Profile(cli_ctx=cli_ctx)
+    cred, _, tenant_id = profile.get_login_credentials(
+        resource=cli_ctx.cloud.endpoints.active_directory_graph_resource_id)
+    client = GraphRbacManagementClient(cred, tenant_id,
+                                       base_url=cli_ctx.cloud.endpoints.active_directory_graph_resource_id)
+    configure_common_settings(cli_ctx, client)
+    return client
+
+
+def _get_object_stubs(graph_client, assignees):
+    from azure.graphrbac.models import GetObjectsParameters
+    result = []
+    assignees = list(assignees)  # callers could pass in a set
+    for i in range(0, len(assignees), 1000):
+        params = GetObjectsParameters(include_directory_object_references=True, object_ids=assignees[i:i + 1000])
+        result += list(graph_client.objects.get_objects_by_object_ids(params))
+    return result
+
+
+def _get_displayable_name(graph_object):
+    if getattr(graph_object, 'user_principal_name', None):
+        return graph_object.user_principal_name
+    if getattr(graph_object, 'service_principal_names', None):
+        return graph_object.service_principal_names[0]
+    return graph_object.display_name or ''
+
+
+def _back_fill_object_name(cli_ctx, acr_tokens):
+    name_mappings = {t.credentials.active_directory_object.object_id: None
+                     for t in acr_tokens if t.credentials and t.credentials.active_directory_object}
+
+    if name_mappings:
+        client = _graph_client_factory(cli_ctx)
+        keys = name_mappings.keys()
+        stubs = _get_object_stubs(client, keys)
+        for k, s in zip(keys, stubs):
+            name_mappings[k] = _get_displayable_name(s)
+        for t in acr_tokens:
+            setattr(t.credentials.active_directory_object, 'object_name',
+                    name_mappings[t.credentials.active_directory_object.object_id])
+
+
+def _resolve_object_id(cli_ctx, assignee, fallback_to_object_id=False):
+    from azure.graphrbac.models import GraphErrorException
+    client = _graph_client_factory(cli_ctx)
+    result = None
+    try:
+        if assignee.find('@') >= 0:  # looks like a user principal name
+            result = list(client.users.list(filter="userPrincipalName eq '{}'".format(assignee)))
+        if not result:
+            result = list(client.service_principals.list(
+                filter="servicePrincipalNames/any(c:c eq '{}')".format(assignee)))
+        if not result and _is_guid(assignee):  # assume an object id, let us verify it
+            result = _get_object_stubs(client, [assignee])
+
+        # 2+ matches should never happen, so we only check 'no match' here
+        if not result:
+            raise CLIError("No matches in graph database for '{}'".format(assignee))
+
+        return result[0].object_id
+    except (CloudError, GraphErrorException):
+        if fallback_to_object_id and _is_guid(assignee):
+            return assignee
+        raise
+
+
+def _is_guid(guid):
+    import uuid
+    try:
+        uuid.UUID(guid)
+        return True
+    except ValueError:
+        return False
